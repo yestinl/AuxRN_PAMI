@@ -307,17 +307,16 @@ class SpeakerDecoder_SameLSTM(SpeakerDecoder):
     def __init__(self, vocab_size, embedding_size, padding_idx, hidden_size, dropout_ratio):
         super(SpeakerDecoder_SameLSTM, self).__init__(vocab_size, embedding_size, padding_idx, hidden_size, dropout_ratio)
 
-    def forward(self, words, ctx, ctx_mask, x):
+    def forward(self, words, ctx, ctx_mask, ctx_w):
         # embeds = self.embedding(words)
         # embeds = self.drop(embeds)
         # x, (h1, c1) = self.lstm(embeds, (h0, c0))
 
-        # x = self.drop(x)
-
+        x = ctx_w
         # Get the size
-        batchXlength = words.size(0) * words.size(1)
+        batchXlength = ctx_w.size(0) * ctx_w.size(1)
         multiplier = batchXlength // ctx.size(0)         # By using this, it also supports the beam-search
-
+        x = self.drop(x)
         # Att and Handle with the shape
         # Reshaping x          <the output> --> (b(word)*l(word), r)
         # Expand the ctx from  (b, a, r)    --> (b(word)*l(word), a, r)
@@ -327,7 +326,7 @@ class SpeakerDecoder_SameLSTM(SpeakerDecoder):
             ctx.unsqueeze(1).expand(-1, multiplier, -1, -1).contiguous(). view(batchXlength, -1, self.hidden_size),
             mask=ctx_mask.unsqueeze(1).expand(-1, multiplier, -1).contiguous().view(batchXlength, -1)
         )
-        x = x.view(words.size(0), words.size(1), self.hidden_size)
+        x = x.view(ctx_w.size(0), ctx_w.size(1), self.hidden_size)
 
         # Output the prediction logit
         x = self.drop(x)

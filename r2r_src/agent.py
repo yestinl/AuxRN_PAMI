@@ -510,7 +510,10 @@ class Seq2SeqAgent(BaseAgent):
         if abs(args.speWeight - 0) > eps:
             if args.modspe:
                 logits = self.speaker_decoder(insts, v_ctx, decode_mask, ctx.detach())
-                logits = logits.permute(0, 2, 1).contiguous()
+                # logits = logits.permute(0, 2, 1).contiguous()
+                _logits = torch.zeros(logits.size(0), insts.size(1), logits.size(2)).cuda()
+                _logits[:, :logits.size(1), :logits.size(2)] = logits
+                logits = _logits.permute(0, 2, 1).contiguous()
             else:
                 logits, _, _ = self.speaker_decoder(insts, v_ctx, decode_mask, h_t, c_t)
                     # Because the softmax_loss only allow dim-1 to be logit,
