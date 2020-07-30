@@ -3,7 +3,11 @@
 import os
 import sys
 import re
-sys.path.append('build')
+from param import args
+if args.upload:
+    sys.path.insert(0, '/R2R-Aux/build')
+else:
+    sys.path.insert(0, 'build')
 import MatterSim
 import string
 import json
@@ -13,7 +17,9 @@ from collections import Counter, defaultdict
 import numpy as np
 import networkx as nx
 from param import args
+import subprocess
 
+from polyaxon_client.tracking import get_data_paths
 
 # padding, unknown word, end of sentence
 base_vocab = ['<PAD>', '<UNK>', '<EOS>']
@@ -68,8 +74,12 @@ def load_datasets(splits):
         # if split in ['train', 'val_seen', 'val_unseen', 'test',
         #              'val_unseen_half1', 'val_unseen_half2', 'val_seen_half1', 'val_seen_half2']:       # Add two halves for sanity check
         if "/" not in split:
-            with open('tasks/R2R/data/R2R_%s.json' % split) as f:
-                new_data = json.load(f)
+            if args.upload:
+                with open(get_sync_dir(os.path.join(args.upload_path,'tasks/R2R/data/R2R_%s.json' % split))) as f:
+                    new_data = json.load(f)
+            else:
+                with open(os.path.join(args.R2R_Aux_path,'tasks/R2R/data/R2R_%s.json' % split)) as f:
+                    new_data = json.load(f)
         else:
             with open(split) as f:
                 new_data = json.load(f)
@@ -523,6 +533,26 @@ class FloydGraph:
             #         print(x1, x2, "%.4f" % self._dis[x1][x2])
             return self.path(x, k) + self.path(k, y)
 
+def get_sync_dir(file):
+    # 只改source_data就好
+    source_data = file
 
+    sync_source_dir = os.path.join(get_data_paths()['ceph'], source_data.strip('/'))
+    sync_dest_dir = os.path.join(get_data_paths()['host-path'],
+                                 os.path.dirname(source_data.strip('/')))
+
+    # 确保同步目录存在, 防止拷贝文件时异常
+    if not os.path.exists(sync_dest_dir):
+        cmd_line = "mkdir -p {0}".format(sync_dest_dir)
+        subprocess.call(cmd_line.split())
+
+    data_dir = os.path.join(get_data_paths()['host-path'], source_data.strip('/'))
+
+    if not os.path.exists(data_dir):
+        # --info=progress2需要rsync3.1+的版本支持
+        cmd_line = "rsync -a {0} {1}".format(sync_source_dir, sync_dest_dir)
+        subprocess.call(cmd_line.split())
+
+    return data_dir
 
 

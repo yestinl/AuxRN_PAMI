@@ -1,3 +1,14 @@
+from param import args
+import sys
+# sys.path.insert(0, '/R2R-EnvDrop/build')
+if args.upload:
+    sys.path.insert(0, '/R2R-Aux/build')
+else:
+    sys.path.insert(0, 'build')
+
+
+
+# setup_seed(args.seed)
 
 import torch
 
@@ -8,32 +19,50 @@ import numpy as np
 from collections import defaultdict
 from speaker import Speaker
 
-from utils import read_vocab,write_vocab,build_vocab,Tokenizer,padding_idx,timeSince, read_img_features
+from utils import read_vocab,write_vocab,build_vocab,Tokenizer,padding_idx,timeSince, read_img_features, get_sync_dir
 import utils
 from env import R2RBatch
 from agent import Seq2SeqAgent
 from eval import Evaluation
-from param import args
+
+from polyaxon_client.tracking import get_outputs_refs_paths
+if args.train == 'validlistener' and args.upload:
+    refs_paths = get_outputs_refs_paths()['experiments'][0]
+    print(refs_paths)
+    load_model = os.path.join(refs_paths,args.load)
+    print(load_model)
 
 import warnings
 warnings.filterwarnings("ignore")
 
 
 from tensorboardX import SummaryWriter
+from polyaxon_client.tracking import get_outputs_path
 
+if args.upload:
+    train_vocab = get_sync_dir(os.path.join(args.upload_path,args.TRAIN_VOCAB))
+    trainval_vocab = get_sync_dir(os.path.join(args.upload_path,args.TRAINVAL_VOCAB))
+    features = get_sync_dir(os.path.join(args.upload_path,args.IMAGENET_FEATURES))
+    output_dir = get_outputs_path()
+    log_dir = os.path.join(output_dir, "snap", args.name)
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    # sparse_obj_feat = get_sync_dir(os.path.join(args.upload_path, args.SPARSE_OBJ_FEATURES))
+    # dense_obj_feat1 = get_sync_dir(os.path.join(args.upload_path, args.DENSE_OBJ_FEATURES1))
+    # dense_obj_feat2 = get_sync_dir(os.path.join(args.upload_path, args.DENSE_OBJ_FEATURES2))
+    # bbox = get_sync_dir(os.path.join(args.upload_path, args.BBOX_FEATURES))
 
-log_dir = 'snap/%s' % args.name
-if not os.path.exists(log_dir):
-    os.makedirs(log_dir)
-
-TRAIN_VOCAB = 'tasks/R2R/data/train_vocab.txt'
-TRAINVAL_VOCAB = 'tasks/R2R/data/trainval_vocab.txt'
-
-IMAGENET_FEATURES = 'img_features/ResNet-152-imagenet.tsv'
-PLACE365_FEATURES = 'img_features/ResNet-152-places365.tsv'
-
-if args.features == 'imagenet':
-    features = IMAGENET_FEATURES
+else:
+    train_vocab = os.path.join(args.R2R_Aux_path,args.TRAIN_VOCAB)
+    trainval_vocab = os.path.join(args.R2R_Aux_path,args.TRAINVAL_VOCAB)
+    features = os.path.join(args.R2R_Aux_path,args.IMAGENET_FEATURES)
+    log_dir = 'snap/%s' % args.name
+    if not os.path.exists(log_dir):
+        os.makedirs(log_dir)
+    # sparse_obj_feat = os.path.join(args.R2R_Aux_path, args.SPARSE_OBJ_FEATURES)
+    # dense_obj_feat1 = os.path.join(args.R2R_Aux_path, args.DENSE_OBJ_FEATURES1)
+    # dense_obj_feat2 = os.path.join(args.R2R_Aux_path, args.DENSE_OBJ_FEATURES2)
+    # bbox = os.path.join(args.R2R_Aux_path, args.BBOX_FEATURES)
 
 if args.fast_train:
     name, ext = os.path.splitext(features)
@@ -107,13 +136,26 @@ def train(train_env, tok, n_iters, log_every=100, val_envs={}, aug_env=None):
     if args.self_train:
         speaker = Speaker(train_env, listner, tok)
         if args.speaker is not None:
-            print("Load the speaker from %s." % args.speaker)
-            speaker.load(args.speaker)
+            if args.upload:
+                print("Load the speaker from %s." % args.speaker)
+                speaker.load(get_sync_dir(os.path.join(args.upload_path,args.speaker)))
+            else:
+                print("Load the speaker from %s." % args.speaker)
+                speaker.load(os.path.join(args.R2R_Aux_path, args.speaker))
+
 
     start_iter = 0
     if args.load is not None:
-        print("LOAD THE listener from %s" % args.load)
-        start_iter = listner.load(os.path.join(args.load))
+        if args.upload:
+            refs_paths = get_outputs_refs_paths()['experiments'][0]
+            print(refs_paths)
+            load_model = os.path.join(refs_paths, args.load)
+            print(load_model)
+            print("LOAD THE listener from %s" % load_model)
+            start_iter = listner.load(load_model)
+        else:
+            print("LOAD THE listener from %s" % args.load)
+            start_iter = listner.load(os.path.join(args.R2R_Aux_path, args.load))
 
     start = time.time()
 
@@ -123,7 +165,7 @@ def train(train_env, tok, n_iters, log_every=100, val_envs={}, aug_env=None):
         log_every = 40
     for idx in range(start_iter, start_iter+n_iters, log_every):
         listner.logs = defaultdict(list)
-        interval = min(log_every, n_iters-idx)
+        interval = min(log_every, start_iter+n_iters-idx)
         iter = idx + interval
 
         # Train for log_every interval
@@ -183,23 +225,27 @@ def train(train_env, tok, n_iters, log_every=100, val_envs={}, aug_env=None):
             listner.test(use_dropout=False, feedback='argmax', iters=iters)
             result = listner.get_results()
             score_summary, _ = evaluator.score(result)
-            loss_str += ", %s " % env_name
+            loss_str += "%s " % env_name
             for metric,val in score_summary.items():
                 if metric in ['success_rate']:
-                    writer.add_scalar("accuracy/%s" % env_name, val, idx)
+                    writer.add_scalar("%s/accuracy" % env_name, val, idx)
                     if env_name in best_val:
                         if val > best_val[env_name]['accu']:
                             best_val[env_name]['accu'] = val
                             best_val[env_name]['update'] = True
+                if metric in ['spl']:
+                    writer.add_scalar("%s/spl" % env_name, val, idx)
                 loss_str += ', %s: %.3f' % (metric, val)
+            loss_str += '\n'
+        loss_str += '\n'
 
         for env_name in best_val:
             if best_val[env_name]['update']:
-                best_val[env_name]['state'] = 'Iter %d %s' % (iter, loss_str)
+                best_val[env_name]['state'] = 'Iter %d \n%s' % (iter, loss_str)
                 best_val[env_name]['update'] = False
-                listner.save(idx, os.path.join("snap", args.name, "state_dict", "best_%s" % (env_name)))
-
-        print(('%s (%d %d%%) %s' % (timeSince(start, float(iter)/n_iters),
+                file_dir = os.path.join(output_dir, "snap", args.name, "state_dict", "best_%s" % (env_name))
+                listner.save(idx, file_dir)
+        print(('%s (%d %d%%) \n%s' % (timeSince(start, float(iter)/n_iters),
                                              iter, float(iter)/n_iters*100, loss_str)))
 
         if iter % 1000 == 0:
@@ -207,16 +253,21 @@ def train(train_env, tok, n_iters, log_every=100, val_envs={}, aug_env=None):
             for env_name in best_val:
                 print(env_name, best_val[env_name]['state'])
 
-        if iter % 50000 == 0:
-            listner.save(idx, os.path.join("snap", args.name, "state_dict", "Iter_%06d" % (iter)))
+        if iter % 40000 == 0:
+            file_dir = os.path.join(output_dir, "snap", args.name, "state_dict", "Iter_%06d" % (iter))
+            listner.save(idx, file_dir)
 
-    listner.save(idx, os.path.join("snap", args.name, "state_dict", "LAST_iter%d" % (idx)))
-
+    # file_dir = os.path.join(output_dir, "snap", args.name, "state_dict", "LAST_iter%d" % (idx))
+    # listner.save(idx, file_dir)
 
 def valid(train_env, tok, val_envs={}):
     agent = Seq2SeqAgent(train_env, "", tok, args.maxAction)
 
-    print("Loaded the listener model at iter %d from %s" % (agent.load(args.load), args.load))
+    if args.upload:
+        print("Loaded the listener model at iter %d from %s" % (agent.load(load_model), load_model))
+    else:
+        print("Loaded the listener model at iter %d from %s" % (agent.load(os.path.join(args.R2R_Aux_path, args.load)),
+                                                                os.path.join(args.R2R_Aux_path, args.load)))
 
     for env_name, (env, evaluator) in val_envs.items():
         agent.logs = defaultdict(list)
@@ -339,10 +390,10 @@ def setup():
     torch.manual_seed(1)
     torch.cuda.manual_seed(1)
     # Check for vocabs
-    if not os.path.exists(TRAIN_VOCAB):
-        write_vocab(build_vocab(splits=['train']), TRAIN_VOCAB)
-    if not os.path.exists(TRAINVAL_VOCAB):
-        write_vocab(build_vocab(splits=['train','val_seen','val_unseen']), TRAINVAL_VOCAB)
+    if not os.path.exists(train_vocab):
+        write_vocab(build_vocab(splits=['train']), train_vocab)
+    if not os.path.exists(trainval_vocab):
+        write_vocab(build_vocab(splits=['train','val_seen','val_unseen']), trainval_vocab)
 
 
 def train_val():
@@ -350,7 +401,7 @@ def train_val():
     # args.fast_train = True
     setup()
     # Create a batch training environment that will also preprocess text
-    vocab = read_vocab(TRAIN_VOCAB)
+    vocab = read_vocab(train_vocab)
     tok = Tokenizer(vocab=vocab, encoding_length=args.maxInput)
 
     feat_dict = read_img_features(features)
@@ -426,7 +477,7 @@ def train_val_augment():
     setup()
 
     # Create a batch training environment that will also preprocess text
-    vocab = read_vocab(TRAIN_VOCAB)
+    vocab = read_vocab(train_vocab)
     tok = Tokenizer(vocab=vocab, encoding_length=args.maxInput)
 
     # Load the env img features
@@ -434,7 +485,10 @@ def train_val_augment():
     featurized_scans = set([key.split("_")[0] for key in list(feat_dict.keys())])
 
     # Load the augmentation data
-    aug_path = args.aug
+    if args.upload:
+        aug_path = get_sync_dir(os.path.join(args.upload_path, args.aug))
+    else:
+        aux_path = os.path.join(args.R2R_Aux_path, args.aug)
 
     # Create the training environment
     train_env = R2RBatch(feat_dict, batch_size=args.batchSize,

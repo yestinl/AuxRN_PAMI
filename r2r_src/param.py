@@ -8,14 +8,14 @@ class Param:
         self.parser = argparse.ArgumentParser(description="")
 
         # General
-        self.parser.add_argument('--iters', type=int, default=100000)
+        self.parser.add_argument('--iters', type=int, default=80000)
         self.parser.add_argument('--name', type=str, default='default')
-        self.parser.add_argument('--train', type=str, default='speaker')
+        self.parser.add_argument('--train', type=str, default='listener')
 
         # Data preparation
         self.parser.add_argument('--maxInput', type=int, default=80, help="max input instruction")
         self.parser.add_argument('--maxDecode', type=int, default=120, help="max input instruction")
-        self.parser.add_argument('--maxAction', type=int, default=20, help='Max Action sequence')
+        self.parser.add_argument('--maxAction', type=int, default=35, help='Max Action sequence')
         self.parser.add_argument('--batchSize', type=int, default=64)
         self.parser.add_argument('--ignoreid', type=int, default=-100)
         self.parser.add_argument('--feature_size', type=int, default=2048)
@@ -31,7 +31,7 @@ class Param:
 
         # Listener Model Config
         self.parser.add_argument("--zeroInit", dest='zero_init', action='store_const', default=False, const=True)
-        self.parser.add_argument("--mlWeight", dest='ml_weight', type=float, default=0.05)
+        self.parser.add_argument("--mlWeight", dest='ml_weight', type=float, default=0.2)
         self.parser.add_argument("--teacherWeight", dest='teacher_weight', type=float, default=1.)
         self.parser.add_argument("--accumulateGrad", dest='accumulate_grad', action='store_const', default=False, const=True)
         self.parser.add_argument("--features", type=str, default='imagenet')
@@ -48,6 +48,7 @@ class Param:
         self.parser.add_argument("--submit", action='store_const', default=False, const=True)
         self.parser.add_argument("--beam", action="store_const", default=False, const=True)
         self.parser.add_argument("--alpha", type=float, default=0.5)
+
 
         # Training Configurations
         self.parser.add_argument('--optim', type=str, default='rms')    # rms, adam
@@ -72,14 +73,17 @@ class Param:
 
         self.parser.add_argument("--bidir", type=bool, default=True)    # This is not full option
         self.parser.add_argument("--encode", type=str, default="word")  # sub, word, sub_ctx
-        self.parser.add_argument("--subout", dest="sub_out", type=str, default="tanh")  # tanh, max
+        self.parser.add_argument("--subout", dest="sub_out", type=str, default="max")  # tanh, max
         self.parser.add_argument("--attn", type=str, default="soft")    # soft, mono, shift, dis_shift
 
-        self.parser.add_argument("--angleFeatSize", dest="angle_feat_size", type=int, default=4)
+        self.parser.add_argument("--angleFeatSize", dest="angle_feat_size", type=int, default=128)
 
         # A2C
         self.parser.add_argument("--gamma", default=0.9, type=float)
         self.parser.add_argument("--normalize", dest="normalize_loss", default="total", type=str, help='batch or total')
+
+        # polyaxon
+        self.parser.add_argument("--upload", action='store_const', default=False, const=True)
 
         self.args = self.parser.parse_args()
 
@@ -103,7 +107,13 @@ args.TRAINVAL_VOCAB = 'tasks/R2R/data/trainval_vocab.txt'
 args.IMAGENET_FEATURES = 'img_features/ResNet-152-imagenet.tsv'
 args.CANDIDATE_FEATURES = 'img_features/ResNet-152-candidate.tsv'
 args.features_fast = 'img_features/ResNet-152-imagenet-fast.tsv'
+# args.SPARSE_OBJ_FEATURES = 'obj_features/%s/panorama_objs_Features_nms_%s.npy'%(args.objdir, args.objdir)
+# args.DENSE_OBJ_FEATURES1 = 'obj_features/%s/panorama_objs_DenseFeatures_nms1_%s.npy'%(args.objdir, args.objdir)
+# args.DENSE_OBJ_FEATURES2 = 'obj_features/%s/panorama_objs_DenseFeatures_nms2_%s.npy'%(args.objdir, args.objdir)
+# args.BBOX_FEATURES = 'obj_features/%s/panorama_objs_bbox_%s.npy'%(args.objdir, args.objdir)
 args.log_dir = 'snap/%s' % args.name
+args.R2R_Aux_path =  '/data3/lyx/project/R2R-Aux'
+args.upload_path = 'lyx'
 
 if not os.path.exists(args.log_dir):
     os.makedirs(args.log_dir)
