@@ -49,6 +49,13 @@ class Param:
         self.parser.add_argument("--beam", action="store_const", default=False, const=True)
         self.parser.add_argument("--alpha", type=float, default=0.5)
 
+        # aux loss
+        self.parser.add_argument('--speWeight', type=float, default=0)
+        self.parser.add_argument('--proWeight', type=float, default=0)
+        self.parser.add_argument('--matWeight', type=float, default=0)
+        self.parser.add_argument('--feaWeight', type=float, default=0)
+        self.parser.add_argument('--angWeight', type=float, default=0)
+        self.parser.add_argument("--modspe", action='store_const', default=False, const=True)
 
         # Training Configurations
         self.parser.add_argument('--optim', type=str, default='rms')    # rms, adam
@@ -112,7 +119,7 @@ args.features_fast = 'img_features/ResNet-152-imagenet-fast.tsv'
 # args.DENSE_OBJ_FEATURES2 = 'obj_features/%s/panorama_objs_DenseFeatures_nms2_%s.npy'%(args.objdir, args.objdir)
 # args.BBOX_FEATURES = 'obj_features/%s/panorama_objs_bbox_%s.npy'%(args.objdir, args.objdir)
 args.log_dir = 'snap/%s' % args.name
-args.R2R_Aux_path =  '/data3/lyx/project/R2R-Aux'
+args.R2R_Aux_path =  '.'
 args.upload_path = 'lyx'
 
 if not os.path.exists(args.log_dir):

@@ -52,6 +52,12 @@ def load_nav_graphs(scans):
             graphs[scan] = G
     return graphs
 
+def gt_words(obs):
+    """
+    See "utils.Tokenizer.encode_sentence(...)" for "instr_encoding" details
+    """
+    seq_tensor = np.array([ob['instr_encoding'] for ob in obs])
+    return torch.from_numpy(seq_tensor).cuda()
 
 def load_datasets(splits):
     """

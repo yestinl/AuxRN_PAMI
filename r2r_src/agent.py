@@ -22,6 +22,7 @@ from param import args
 from collections import defaultdict
 
 
+
 class BaseAgent(object):
     ''' Base class for an R2R agent to generate and save trajectories. '''
 
@@ -102,15 +103,50 @@ class Seq2SeqAgent(BaseAgent):
         self.critic = model.Critic().cuda()
         self.models = (self.encoder, self.decoder, self.critic)
 
+        if args.modspe:
+            self.speaker_decoder = model.SpeakerDecoder_SameLSTM(self.tok.vocab_size(), args.wemb,
+                                                             self.tok.word_to_index['<PAD>'], args.rnn_dim,
+                                                             args.dropout).cuda()
+        else:
+            self.speaker_decoder = model.SpeakerDecoder(self.tok.vocab_size(), args.wemb, self.tok.word_to_index['<PAD>'],
+                                                        args.rnn_dim, args.dropout).cuda()
+        if args.upload:
+            speaker_model = get_sync_dir('lyx/snap/speaker/state_dict/best_val_unseen_bleu')
+        else:
+            speaker_model = os.path.join(args.R2R_Aux_path, 'snap/speaker/state_dict/best_val_unseen_bleu')
+        states = torch.load(speaker_model)
+        self.speaker_decoder.load_state_dict(states["decoder"]["state_dict"])
+        self.aux_models = (self.speaker_decoder)
+
         # Optimizers
         self.encoder_optimizer = args.optimizer(self.encoder.parameters(), lr=args.lr)
         self.decoder_optimizer = args.optimizer(self.decoder.parameters(), lr=args.lr)
         self.critic_optimizer = args.optimizer(self.critic.parameters(), lr=args.lr)
         self.optimizers = (self.encoder_optimizer, self.decoder_optimizer, self.critic_optimizer)
 
+        self.aux_optimizer = args.optimizer(
+            list(self.speaker_decoder.parameters())
+            # + list(self.progress_indicator.parameters())
+            # + list(self.matching_network.parameters())
+            # + list(self.feature_predictor.parameters())
+            # + list(self.angle_predictor.parameters())
+            , lr=args.lr)
+        
+        self.all_tuple = [
+            ("encoder", self.encoder, self.encoder_optimizer),
+            ("decoder", self.decoder, self.decoder_optimizer),
+            ("critic", self.critic, self.critic_optimizer),
+            ("speaker_decoder", self.speaker_decoder, self.aux_optimizer),
+            # ("progress_indicator", self.progress_indicator, self.aux_optimizer),
+            # ("matching_network", self.matching_network, self.aux_optimizer),
+            # ("feature_predictor", self.feature_predictor, self.aux_optimizer),
+            # ("angle_predictor", self.feature_predictor, self.aux_optimizer)
+        ]
+
         # Evaluations
         self.losses = []
         self.criterion = nn.CrossEntropyLoss(ignore_index=args.ignoreid, size_average=False)
+        self.softmax_loss = torch.nn.CrossEntropyLoss(ignore_index=self.tok.word_to_index['<PAD>'])
 
         # Logs
         sys.stdout.flush()
@@ -292,6 +328,8 @@ class Seq2SeqAgent(BaseAgent):
         entropys = []
         ml_loss = 0.
 
+        v_ctx = [] # ctx before language att
+        vl_ctx = [] # ctx after language att
         h1 = h_t
         for t in range(self.episode_len):
 
@@ -305,6 +343,8 @@ class Seq2SeqAgent(BaseAgent):
                                                ctx, ctx_mask,
                                                already_dropfeat=(speaker is not None))
 
+            v_ctx.append(h_t)
+            vl_ctx.append(h1)
             hidden_states.append(h_t)
 
             # Mask outputs where agent can't move forward
@@ -426,6 +466,7 @@ class Seq2SeqAgent(BaseAgent):
                     rl_loss += (- 0.01 * entropys[t] * mask_).sum()
                 self.logs['critic_loss'].append((((r_ - v_) ** 2) * mask_).sum().item())
 
+
                 total = total + np.sum(masks[t])
             self.logs['total'].append(total)
 
@@ -437,15 +478,53 @@ class Seq2SeqAgent(BaseAgent):
             else:
                 assert args.normalize_loss == 'none'
 
+            self.logs['rl_loss'].append(rl_loss.detach())
             self.loss += rl_loss
 
         if train_ml is not None:
-            self.loss += ml_loss * train_ml / batch_size
+            ml_loss = ml_loss * train_ml / batch_size
+            self.logs['ml_loss'].append(ml_loss.detach())
+            self.loss += ml_loss
 
         if type(self.loss) is int:  # For safety, it will be activated if no losses are added
             self.losses.append(0.)
         else:
             self.losses.append(self.loss.item() / self.episode_len)    # This argument is useless.
+        
+        # auxiliary tasks
+        h_t = h_t.unsqueeze(0)
+        c_t = c_t.unsqueeze(0)
+        insts = utils.gt_words(perm_obs)
+
+        # if args.modspe:
+        #     l = ctx.size(1)
+        #     insts = insts[:, :l]
+        
+        v_ctx = torch.stack(v_ctx, dim=1)
+        vl_ctx = torch.stack(vl_ctx, dim=1)
+        decode_mask = [torch.tensor(mask) for mask in masks]
+        decode_mask = (1 - torch.stack(decode_mask, dim=1)).bool().cuda()  # different definition about mask
+        
+        # aux #1: speaker recover loss
+        eps = 1e-6
+        if abs(args.speWeight - 0) > eps:
+            if args.modspe:
+                logits = self.speaker_decoder(insts, v_ctx, decode_mask, ctx.detach())
+                logits = logits.permute(0, 2, 1).contiguous()
+            else:
+                logits, _, _ = self.speaker_decoder(insts, v_ctx, decode_mask, h_t, c_t)
+                    # Because the softmax_loss only allow dim-1 to be logit,
+                    # So permute the output (batch_size, length, logit) --> (batch_size, logit, length)
+                logits = logits.permute(0, 2, 1).contiguous()
+            spe_loss = self.softmax_loss(
+                    input=logits[:, :, :-1],  # -1 for aligning
+                    target=insts[:, 1:]  # "1:" to ignore the word <BOS>
+                    )
+            spe_loss = spe_loss * args.speWeight
+            self.loss += spe_loss
+            self.logs['spe_loss'].append(spe_loss.detach())
+        else:
+            self.logs['spe_loss'].append(0)
 
         return traj
 
@@ -574,7 +653,7 @@ class Seq2SeqAgent(BaseAgent):
 
             # Update the dijk graph's states with the newly visited viewpoint
             candidate_mask = utils.length2mask(candidate_leng)
-            logit.masked_fill_(candidate_mask, -float('inf'))
+            logit.masked_fill_(candidate_mask.bool(), -float('inf'))
             log_probs = F.log_softmax(logit, 1)                              # Calculate the log_prob here
             _, max_act = log_probs.max(1)
 

@@ -11,8 +11,11 @@ environment:
             requests: 1
             limits: 1
     outputs:
-        experiments: [23676]
-
+        experiments: [10647]
+inputs:
+  - name: name
+    is_optional: true
+    type: str
 
 run:
-    cmd: python3.6 r2r_src/train.py --upload  --train validlistener --submit --load snap/baseline/state_dict/best_val_unseen
+    cmd: python3.6 r2r_src/train.py --upload --speWeight 1 --modspe --name {{ name }}

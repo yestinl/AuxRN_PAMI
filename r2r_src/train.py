@@ -53,10 +53,11 @@ if args.upload:
     # bbox = get_sync_dir(os.path.join(args.upload_path, args.BBOX_FEATURES))
 
 else:
+    output_dir = "."
     train_vocab = os.path.join(args.R2R_Aux_path,args.TRAIN_VOCAB)
     trainval_vocab = os.path.join(args.R2R_Aux_path,args.TRAINVAL_VOCAB)
     features = os.path.join(args.R2R_Aux_path,args.IMAGENET_FEATURES)
-    log_dir = 'snap/%s' % args.name
+    log_dir = os.path.join(output_dir, "snap", args.name)
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
     # sparse_obj_feat = os.path.join(args.R2R_Aux_path, args.SPARSE_OBJ_FEATURES)
@@ -201,17 +202,29 @@ def train(train_env, tok, n_iters, log_every=100, val_envs={}, aug_env=None):
 
         # Log the training stats to tensorboard
         total = max(sum(listner.logs['total']), 1)
-        length = max(len(listner.logs['critic_loss']), 1)
-        critic_loss = sum(listner.logs['critic_loss']) / total #/ length / args.batchSize
-        entropy = sum(listner.logs['entropy']) / total #/ length / args.batchSize
-        predict_loss = sum(listner.logs['us_loss']) / max(len(listner.logs['us_loss']), 1)
-        writer.add_scalar("loss/critic", critic_loss, idx)
+        # import pdb; pdb.set_trace() # length_rl == length_ml ? entropy length
+        assert(max(len(listner.logs['rl_loss']), 1) == max(len(listner.logs['ml_loss']), 1))
+        max_rl_length = max(len(listner.logs['critic_loss']), 1)
+        log_length = max(len(listner.logs['rl_loss']), 1)
+        rl_loss = sum(listner.logs['rl_loss']) / log_length
+        ml_loss = sum(listner.logs['ml_loss']) / log_length
+        spe_loss = sum(listner.logs['spe_loss']) / log_length
+        entropy = sum(listner.logs['entropy']) / log_length #/ length / args.batchSize
+        # predict_loss = sum(listner.logs['us_loss']) / max(len(listner.logs['us_loss']), 1)
+        writer.add_scalar("loss/rl_loss", rl_loss, idx)
+        writer.add_scalar("loss/ml_loss", ml_loss, idx)
         writer.add_scalar("policy_entropy", entropy, idx)
-        writer.add_scalar("loss/unsupervised", predict_loss, idx)
+        writer.add_scalar("loss/spe_loss", spe_loss, idx)
+        # writer.add_scalar("loss/pro_loss", pro_loss, idx)
+        # writer.add_scalar("loss/mat_loss", mat_loss, idx)
+        # writer.add_scalar("loss/fea_loss", fea_loss, idx)
+        # writer.add_scalar("loss/ang_loss", ang_loss, idx)
+        # writer.add_scalar("policy_entropy", entropy, idx)
+        # writer.add_scalar("loss/unsupervised", predict_loss, idx)
         writer.add_scalar("total_actions", total, idx)
-        writer.add_scalar("max_length", length, idx)
+        writer.add_scalar("max_rl_length", max_rl_length, idx)
         print("total_actions", total)
-        print("max_length", length)
+        print("max_rl_length", max_rl_length)
 
         # Run validation
         loss_str = ""
