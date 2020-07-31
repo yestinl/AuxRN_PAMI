@@ -269,20 +269,17 @@ class Seq2SeqAgent(BaseAgent):
         perm_obs = obs[perm_idx]
 
         # viualize obs
-        visual_obs = []
-        for obs in perm_obs:
-            visual_obs.append({
-                'instr_id': obs['instr_id'],
-                'scan': obs['scan'],
-                'viewpoint': obs['viewpoint'],
-                'viewIndex': obs['viewIndex'],
-                'heading': obs['heading'],
-                'elevation': obs['elevation'],
-                'candidate': obs['candidate'],
-                'instructions': obs['instructions'],
-                'teacher': obs['teacher'],
-                'path_id': obs['path_id']
-            })
+        if args.v_vis_attn:
+            visual_obs = []
+            for obs in perm_obs:
+                visual_obs.append({
+                    'instr_id': obs['instr_id'],
+                    'scan': obs['scan'],
+                    'viewpoint': obs['viewpoint'],
+                    'viewIndex': obs['viewIndex'],
+                    'instructions': obs['instructions'],
+                    'path_id': obs['path_id']
+                })
 
 
         ctx, h_t, c_t = self.encoder(seq, seq_lengths)
@@ -325,10 +322,11 @@ class Seq2SeqAgent(BaseAgent):
                                                    h_t, h1, c_t,
                                                    ctx, ctx_mask,
                                                    already_dropfeat=(speaker is not None))
-                for i,vo in enumerate(visual_obs):
-                    vo['view_attn'] = logit_feat[i].detach().cpu().numpy()
-                    self.val_env_vis_attn[vo['instr_id']+'_'+vo['scan']+
-                                          '_'+ vo['viewpoint']] = vo
+                if args.v_vis_attn:
+                    for i,vo in enumerate(visual_obs):
+                        logits_f = logit_feat[:,0:12] + logit_feat[:,12:24] + logit_feat[:,24:36]
+                        vo['view_attn'] = logits_f[i].detach().cpu().numpy()
+                        self.val_env_vis_attn[vo['instr_id']].append(vo)
             else:
                 h_t, c_t, logit, h1  = self.decoder(input_a_t, f_t, candidate_feat,
                                                    h_t, h1, c_t,

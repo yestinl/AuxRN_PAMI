@@ -279,12 +279,20 @@ def valid(train_env, tok, val_envs={}):
         iters = None
         if args.v_vis_attn:
             agent.val_env_vis_attn = {}
-        agent.test(use_dropout=False, feedback='argmax', iters=iters)
+            if env_name == 'val_unseen':
+                with open('visualization/val_unseen_path_id.txt', 'r') as f:
+                    for line in f:
+                        path_id = line.strip('\n')
+                        agent.val_env_vis_attn[path_id] = []
+                agent.test(use_dropout=False, feedback='argmax', iters=iters)
+
+        # agent.test(use_dropout=False, feedback='argmax', iters=iters)
         result = agent.get_results()
 
         if args.v_vis_attn:
-            vis_attn_path = 'visualization/%s_vis_attn.npy'%env_name
-            np.save(vis_attn_path, agent.val_env_vis_attn)
+            if env_name == 'val_unseen':
+                vis_attn_path = 'visualization/%s_vis_attn.npy'%env_name
+                np.save(vis_attn_path, agent.val_env_vis_attn)
         if env_name != '':
             score_summary, _ = evaluator.score(result)
             loss_str = "Env name: %s" % env_name
