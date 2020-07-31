@@ -103,24 +103,24 @@ class Seq2SeqAgent(BaseAgent):
         self.critic = model.Critic().cuda()
         self.models = (self.encoder, self.decoder, self.critic)
         
-        if args.modspe:
-            self.speaker_decoder = model.SpeakerDecoder_SameLSTM(self.tok.vocab_size(), args.wemb,
-                                                             self.tok.word_to_index['<PAD>'], args.rnn_dim,
-                                                             args.dropout).cuda()
-        else:
-            self.speaker_decoder = model.SpeakerDecoder(self.tok.vocab_size(), args.wemb, self.tok.word_to_index['<PAD>'],
-                                                        args.rnn_dim, args.dropout).cuda()
-        self.progress_indicator = model.ProgressIndicator().cuda()
-        self.matching_network = model.MatchingNetwork().cuda()
-        self.feature_predictor = model.FeaturePredictor().cuda()
-        self.angle_predictor = model.AnglePredictor().cuda()
-        if args.upload:
-            speaker_model = get_sync_dir('lyx/snap/speaker/state_dict/best_val_unseen_bleu')
-        else:
-            speaker_model = os.path.join(args.R2R_Aux_path, 'snap/speaker/state_dict/best_val_unseen_bleu')
-        states = torch.load(speaker_model)
-        self.speaker_decoder.load_state_dict(states["decoder"]["state_dict"])
-        self.aux_models = (self.speaker_decoder, self.progress_indicator, self.matching_network)
+        # if args.modspe:
+        #     self.speaker_decoder = model.SpeakerDecoder_SameLSTM(self.tok.vocab_size(), args.wemb,
+        #                                                      self.tok.word_to_index['<PAD>'], args.rnn_dim,
+        #                                                      args.dropout).cuda()
+        # else:
+        #     self.speaker_decoder = model.SpeakerDecoder(self.tok.vocab_size(), args.wemb, self.tok.word_to_index['<PAD>'],
+        #                                                 args.rnn_dim, args.dropout).cuda()
+        # self.progress_indicator = model.ProgressIndicator().cuda()
+        # self.matching_network = model.MatchingNetwork().cuda()
+        # self.feature_predictor = model.FeaturePredictor().cuda()
+        # self.angle_predictor = model.AnglePredictor().cuda()
+        # if args.upload:
+        #     speaker_model = get_sync_dir('lyx/snap/speaker/state_dict/best_val_unseen_bleu')
+        # else:
+        #     speaker_model = os.path.join(args.R2R_Aux_path, 'snap/speaker/state_dict/best_val_unseen_bleu')
+        # states = torch.load(speaker_model)
+        # self.speaker_decoder.load_state_dict(states["decoder"]["state_dict"])
+        # self.aux_models = (self.speaker_decoder, self.progress_indicator, self.matching_network)
 
         # Optimizers
         self.encoder_optimizer = args.optimizer(self.encoder.parameters(), lr=args.lr)
