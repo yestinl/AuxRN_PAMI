@@ -85,6 +85,9 @@ class Param:
         # polyaxon
         self.parser.add_argument("--upload", action='store_const', default=False, const=True)
 
+        # visualization
+        self.parser.add_argument("--v_vis_attn", action='store_const', default=False, const=True)
+
         self.args = self.parser.parse_args()
 
         if self.args.optim == 'rms':

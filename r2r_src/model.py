@@ -172,7 +172,7 @@ class AttnDecoderLSTM(nn.Module):
             feature[..., :-args.angle_feat_size] = self.drop_env(feature[..., :-args.angle_feat_size])   # Do not drop the last args.angle_feat_size (position feat)
 
         prev_h1_drop = self.drop(prev_h1)
-        attn_feat, _ = self.feat_att_layer(prev_h1_drop, feature, output_tilde=False)
+        attn_feat, logit_feat = self.feat_att_layer(prev_h1_drop, feature, output_tilde=False)
 
         concat_input = torch.cat((action_embeds, attn_feat), 1) # (batch, embedding_size+feature_size)
         h_1, c_1 = self.lstm(concat_input, (prev_h1, c_0))
@@ -188,6 +188,8 @@ class AttnDecoderLSTM(nn.Module):
 
         _, logit = self.candidate_att_layer(h_tilde_drop, cand_feat, output_prob=False)
 
+        if args.v_vis_attn:
+            return h_1,c_1, logit, h_tilde, logit_feat
         return h_1, c_1, logit, h_tilde
 
 

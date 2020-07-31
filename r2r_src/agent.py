@@ -116,6 +116,10 @@ class Seq2SeqAgent(BaseAgent):
         sys.stdout.flush()
         self.logs = defaultdict(list)
 
+        # Visualize
+        self.val_name = None
+        self.val_env_vis_attn = None
+
 
     def _sort_batch(self, obs):
         ''' Extract instructions from a list of observations and sort by descending
@@ -264,6 +268,23 @@ class Seq2SeqAgent(BaseAgent):
         seq, seq_mask, seq_lengths, perm_idx = self._sort_batch(obs)
         perm_obs = obs[perm_idx]
 
+        # viualize obs
+        visual_obs = []
+        for obs in perm_obs:
+            visual_obs.append({
+                'instr_id': obs['instr_id'],
+                'scan': obs['scan'],
+                'viewpoint': obs['viewpoint'],
+                'viewIndex': obs['viewIndex'],
+                'heading': obs['heading'],
+                'elevation': obs['elevation'],
+                'candidate': obs['candidate'],
+                'instructions': obs['instructions'],
+                'teacher': obs['teacher'],
+                'path_id': obs['path_id']
+            })
+
+
         ctx, h_t, c_t = self.encoder(seq, seq_lengths)
         ctx_mask = seq_mask
 
@@ -291,7 +312,6 @@ class Seq2SeqAgent(BaseAgent):
         masks = []
         entropys = []
         ml_loss = 0.
-
         h1 = h_t
         for t in range(self.episode_len):
 
@@ -300,10 +320,20 @@ class Seq2SeqAgent(BaseAgent):
                 candidate_feat[..., :-args.angle_feat_size] *= noise
                 f_t[..., :-args.angle_feat_size] *= noise
 
-            h_t, c_t, logit, h1 = self.decoder(input_a_t, f_t, candidate_feat,
-                                               h_t, h1, c_t,
-                                               ctx, ctx_mask,
-                                               already_dropfeat=(speaker is not None))
+            if args.v_vis_attn:
+                h_t, c_t, logit, h1, logit_feat = self.decoder(input_a_t, f_t, candidate_feat,
+                                                   h_t, h1, c_t,
+                                                   ctx, ctx_mask,
+                                                   already_dropfeat=(speaker is not None))
+                for i,vo in enumerate(visual_obs):
+                    vo['view_attn'] = logit_feat[i].detach().cpu().numpy()
+                    self.val_env_vis_attn[vo['instr_id']+'_'+vo['scan']+
+                                          '_'+ vo['viewpoint']] = vo
+            else:
+                h_t, c_t, logit, h1  = self.decoder(input_a_t, f_t, candidate_feat,
+                                                   h_t, h1, c_t,
+                                                   ctx, ctx_mask,
+                                                   already_dropfeat=(speaker is not None))
 
             hidden_states.append(h_t)
 

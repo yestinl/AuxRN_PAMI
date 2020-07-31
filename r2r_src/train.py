@@ -243,8 +243,9 @@ def train(train_env, tok, n_iters, log_every=100, val_envs={}, aug_env=None):
             if best_val[env_name]['update']:
                 best_val[env_name]['state'] = 'Iter %d \n%s' % (iter, loss_str)
                 best_val[env_name]['update'] = False
-                file_dir = os.path.join(output_dir, "snap", args.name, "state_dict", "best_%s" % (env_name))
-                listner.save(idx, file_dir)
+                if args.upload:
+                    file_dir = os.path.join(output_dir, "snap", args.name, "state_dict", "best_%s" % (env_name))
+                    listner.save(idx, file_dir)
         print(('%s (%d %d%%) \n%s' % (timeSince(start, float(iter)/n_iters),
                                              iter, float(iter)/n_iters*100, loss_str)))
 
@@ -254,8 +255,9 @@ def train(train_env, tok, n_iters, log_every=100, val_envs={}, aug_env=None):
                 print(env_name, best_val[env_name]['state'])
 
         if iter % 40000 == 0:
-            file_dir = os.path.join(output_dir, "snap", args.name, "state_dict", "Iter_%06d" % (iter))
-            listner.save(idx, file_dir)
+            if args.upload:
+                file_dir = os.path.join(output_dir, "snap", args.name, "state_dict", "Iter_%06d" % (iter))
+                listner.save(idx, file_dir)
 
     # file_dir = os.path.join(output_dir, "snap", args.name, "state_dict", "LAST_iter%d" % (idx))
     # listner.save(idx, file_dir)
@@ -272,11 +274,17 @@ def valid(train_env, tok, val_envs={}):
     for env_name, (env, evaluator) in val_envs.items():
         agent.logs = defaultdict(list)
         agent.env = env
+        agent.val_name = env_name
 
         iters = None
+        if args.v_vis_attn:
+            agent.val_env_vis_attn = {}
         agent.test(use_dropout=False, feedback='argmax', iters=iters)
         result = agent.get_results()
 
+        if args.v_vis_attn:
+            vis_attn_path = 'visualization/%s_vis_attn.npy'%env_name
+            np.save(vis_attn_path, agent.val_env_vis_attn)
         if env_name != '':
             score_summary, _ = evaluator.score(result)
             loss_str = "Env name: %s" % env_name
