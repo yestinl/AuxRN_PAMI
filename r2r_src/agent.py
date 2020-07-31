@@ -496,108 +496,108 @@ class Seq2SeqAgent(BaseAgent):
         else:
             self.losses.append(self.loss.item() / self.episode_len)    # This argument is useless.
         
-        # auxiliary tasks
-        h_t = h_t.unsqueeze(0)
-        c_t = c_t.unsqueeze(0)
-        insts = utils.gt_words(perm_obs)
+        # # auxiliary tasks
+        # h_t = h_t.unsqueeze(0)
+        # c_t = c_t.unsqueeze(0)
+        # insts = utils.gt_words(perm_obs)
 
-        # if args.modspe:
-        #     l = ctx.size(1)
-        #     insts = insts[:, :l]
+        # # if args.modspe:
+        # #     l = ctx.size(1)
+        # #     insts = insts[:, :l]
         
-        v_ctx = torch.stack(v_ctx, dim=1)
-        vl_ctx = torch.stack(vl_ctx, dim=1)
-        decode_mask = [torch.tensor(mask) for mask in masks]
-        decode_mask = (1 - torch.stack(decode_mask, dim=1)).bool().cuda()  # different definition about mask
+        # v_ctx = torch.stack(v_ctx, dim=1)
+        # vl_ctx = torch.stack(vl_ctx, dim=1)
+        # decode_mask = [torch.tensor(mask) for mask in masks]
+        # decode_mask = (1 - torch.stack(decode_mask, dim=1)).bool().cuda()  # different definition about mask
         
-        # aux #1: speaker recover loss
-        eps = 1e-6
-        if abs(args.speWeight - 0) > eps:
-            if args.modspe:
-                logits = self.speaker_decoder(insts, v_ctx, decode_mask, ctx)
-                # logits = logits.permute(0, 2, 1).contiguous()
-                _logits = torch.zeros(logits.size(0), insts.size(1), logits.size(2)).cuda()
-                _logits[:, :logits.size(1), :logits.size(2)] = logits
-                logits = _logits.permute(0, 2, 1).contiguous()
-            else:
-                logits, _, _ = self.speaker_decoder(insts, v_ctx, decode_mask, h_t, c_t)
-                    # Because the softmax_loss only allow dim-1 to be logit,
-                    # So permute the output (batch_size, length, logit) --> (batch_size, logit, length)
-                logits = logits.permute(0, 2, 1).contiguous()
-            spe_loss = self.softmax_loss(
-                    input=logits[:, :, :-1],  # -1 for aligning
-                    target=insts[:, 1:]  # "1:" to ignore the word <BOS>
-                    )
-            spe_loss = spe_loss * args.speWeight
-            self.loss += spe_loss
-            self.logs['spe_loss'].append(spe_loss.detach())
-        else:
-            self.logs['spe_loss'].append(0)
+        # # aux #1: speaker recover loss
+        # eps = 1e-6
+        # if abs(args.speWeight - 0) > eps:
+        #     if args.modspe:
+        #         logits = self.speaker_decoder(insts, v_ctx, decode_mask, ctx)
+        #         # logits = logits.permute(0, 2, 1).contiguous()
+        #         _logits = torch.zeros(logits.size(0), insts.size(1), logits.size(2)).cuda()
+        #         _logits[:, :logits.size(1), :logits.size(2)] = logits
+        #         logits = _logits.permute(0, 2, 1).contiguous()
+        #     else:
+        #         logits, _, _ = self.speaker_decoder(insts, v_ctx, decode_mask, h_t, c_t)
+        #             # Because the softmax_loss only allow dim-1 to be logit,
+        #             # So permute the output (batch_size, length, logit) --> (batch_size, logit, length)
+        #         logits = logits.permute(0, 2, 1).contiguous()
+        #     spe_loss = self.softmax_loss(
+        #             input=logits[:, :, :-1],  # -1 for aligning
+        #             target=insts[:, 1:]  # "1:" to ignore the word <BOS>
+        #             )
+        #     spe_loss = spe_loss * args.speWeight
+        #     self.loss += spe_loss
+        #     self.logs['spe_loss'].append(spe_loss.detach())
+        # else:
+        #     self.logs['spe_loss'].append(0)
     
-        # aux #2: progress indicator
-        if abs(args.proWeight - 0) > eps:
-            if args.modpro:
-                prob = self.progress_indicator(vl_ctx)
-                valid_mask = ~decode_mask
-                progress_label = utils.progress_generator(decode_mask)
-                pro_loss = F.binary_cross_entropy(prob.squeeze(), progress_label, reduce=False)
-                pro_loss = torch.mean(pro_loss * valid_mask.float()) * args.proWeight # mask out
-                self.loss += pro_loss
-                self.logs['pro_loss'].append(pro_loss.detach())
-            else:
-                prob = self.progress_indicator(vl_ctx)
-                progress_label = utils.progress_generator(decode_mask)
-                pro_loss = self.bce_loss(prob.squeeze(), progress_label)
-                pro_loss = pro_loss * args.proWeight
-                self.loss += pro_loss
-                self.logs['pro_loss'].append(pro_loss.detach())
-        else:
-            self.logs['pro_loss'].append(0)
+        # # aux #2: progress indicator
+        # if abs(args.proWeight - 0) > eps:
+        #     if args.modpro:
+        #         prob = self.progress_indicator(vl_ctx)
+        #         valid_mask = ~decode_mask
+        #         progress_label = utils.progress_generator(decode_mask)
+        #         pro_loss = F.binary_cross_entropy(prob.squeeze(), progress_label, reduce=False)
+        #         pro_loss = torch.mean(pro_loss * valid_mask.float()) * args.proWeight # mask out
+        #         self.loss += pro_loss
+        #         self.logs['pro_loss'].append(pro_loss.detach())
+        #     else:
+        #         prob = self.progress_indicator(vl_ctx)
+        #         progress_label = utils.progress_generator(decode_mask)
+        #         pro_loss = self.bce_loss(prob.squeeze(), progress_label)
+        #         pro_loss = pro_loss * args.proWeight
+        #         self.loss += pro_loss
+        #         self.logs['pro_loss'].append(pro_loss.detach())
+        # else:
+        #     self.logs['pro_loss'].append(0)
         
-        # aux #3: inst matching
-        if abs(args.matWeight - 0) > eps:
-            if args.modmat:
-                for i in range(v_ctx.shape[1]):
-                    if i == 0:
-                        h1 = v_ctx[:, i, :]
-                    else:
-                        _h1 = v_ctx[:, i, :]
-                        valid_mask = ~decode_mask[:, i] # True: move, False: already finished BEFORE THIS ACTION
-                        h1 = h1 * (1-valid_mask.float().unsqueeze(1)) + _h1 * valid_mask.float().unsqueeze(1) # update active feature
-                batch_size = h1.shape[0]
-                rand_idx = torch.randperm(batch_size)
-                order_idx = torch.arange(0, batch_size)
-                matching_mask = torch.empty(batch_size).random_(2).bool()
-                same_idx = rand_idx == order_idx
-                label = (matching_mask | same_idx).float().unsqueeze(1).cuda()  # 1 same, 0 different
-                # label_mask = ~decode_mask[:, i]
-                # label_mask = label_mask & label_mask[rand_idx]
-                new_h1 = label * h1 + (1 - label) * h1[rand_idx, :]
-                l_ctx = torch.cat((ctx[:,0,:], ctx[:,-1,:]), dim=1).detach()
-                vl_pair = torch.cat((new_h1, l_ctx), dim=1)
-                prob = self.matching_network(vl_pair)
-                mat_loss = F.binary_cross_entropy(prob, label) * args.matWeight
-                # mat_loss = F.binary_cross_entropy(prob, label, reduce=False) * args.matWeight
-                # mat_loss = torch.mean(mat_loss.squeeze() * label_mask.float())
-                self.loss += mat_loss
-            else:
-                h1 = v_ctx[:, -1, :]
-                batch_size = h1.shape[0]
-                rand_idx = torch.randperm(batch_size)
-                order_idx = torch.arange(0, batch_size)
-                matching_mask = torch.empty(batch_size).random_(2).bool()
-                same_idx = rand_idx == order_idx
-                label = (matching_mask | same_idx).float().unsqueeze(1).cuda()  # 1 same, 0 different
-                # label_mask = ~decode_mask[:, i]
-                # label_mask = label_mask & label_mask[rand_idx]
-                new_h1 = label * h1 + (1 - label) * h1[rand_idx, :]
-                l_ctx = torch.cat((ctx[:,0,:], ctx[:,-1,:]), dim=1).detach()
-                vl_pair = torch.cat((new_h1, l_ctx), dim=1)
-                prob = self.matching_network(vl_pair)
-                mat_loss = F.binary_cross_entropy(prob, label) * args.matWeight
-                self.loss += mat_loss
-        else:
-            self.logs['aux_loss3'].append(0)
+        # # aux #3: inst matching
+        # if abs(args.matWeight - 0) > eps:
+        #     if args.modmat:
+        #         for i in range(v_ctx.shape[1]):
+        #             if i == 0:
+        #                 h1 = v_ctx[:, i, :]
+        #             else:
+        #                 _h1 = v_ctx[:, i, :]
+        #                 valid_mask = ~decode_mask[:, i] # True: move, False: already finished BEFORE THIS ACTION
+        #                 h1 = h1 * (1-valid_mask.float().unsqueeze(1)) + _h1 * valid_mask.float().unsqueeze(1) # update active feature
+        #         batch_size = h1.shape[0]
+        #         rand_idx = torch.randperm(batch_size)
+        #         order_idx = torch.arange(0, batch_size)
+        #         matching_mask = torch.empty(batch_size).random_(2).bool()
+        #         same_idx = rand_idx == order_idx
+        #         label = (matching_mask | same_idx).float().unsqueeze(1).cuda()  # 1 same, 0 different
+        #         # label_mask = ~decode_mask[:, i]
+        #         # label_mask = label_mask & label_mask[rand_idx]
+        #         new_h1 = label * h1 + (1 - label) * h1[rand_idx, :]
+        #         l_ctx = torch.cat((ctx[:,0,:], ctx[:,-1,:]), dim=1).detach()
+        #         vl_pair = torch.cat((new_h1, l_ctx), dim=1)
+        #         prob = self.matching_network(vl_pair)
+        #         mat_loss = F.binary_cross_entropy(prob, label) * args.matWeight
+        #         # mat_loss = F.binary_cross_entropy(prob, label, reduce=False) * args.matWeight
+        #         # mat_loss = torch.mean(mat_loss.squeeze() * label_mask.float())
+        #         self.loss += mat_loss
+        #     else:
+        #         h1 = v_ctx[:, -1, :]
+        #         batch_size = h1.shape[0]
+        #         rand_idx = torch.randperm(batch_size)
+        #         order_idx = torch.arange(0, batch_size)
+        #         matching_mask = torch.empty(batch_size).random_(2).bool()
+        #         same_idx = rand_idx == order_idx
+        #         label = (matching_mask | same_idx).float().unsqueeze(1).cuda()  # 1 same, 0 different
+        #         # label_mask = ~decode_mask[:, i]
+        #         # label_mask = label_mask & label_mask[rand_idx]
+        #         new_h1 = label * h1 + (1 - label) * h1[rand_idx, :]
+        #         l_ctx = torch.cat((ctx[:,0,:], ctx[:,-1,:]), dim=1).detach()
+        #         vl_pair = torch.cat((new_h1, l_ctx), dim=1)
+        #         prob = self.matching_network(vl_pair)
+        #         mat_loss = F.binary_cross_entropy(prob, label) * args.matWeight
+        #         self.loss += mat_loss
+        # else:
+        #     self.logs['aux_loss3'].append(0)
 
         return traj
 
