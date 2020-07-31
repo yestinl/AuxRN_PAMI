@@ -128,23 +128,23 @@ class Seq2SeqAgent(BaseAgent):
         self.critic_optimizer = args.optimizer(self.critic.parameters(), lr=args.lr)
         self.optimizers = (self.encoder_optimizer, self.decoder_optimizer, self.critic_optimizer)
 
-        self.aux_optimizer = args.optimizer(
-            list(self.speaker_decoder.parameters())
-            + list(self.progress_indicator.parameters())
-            + list(self.matching_network.parameters())
-            + list(self.feature_predictor.parameters())
-            + list(self.angle_predictor.parameters())
-            , lr=args.lr)
+        # self.aux_optimizer = args.optimizer(
+        #     list(self.speaker_decoder.parameters())
+        #     + list(self.progress_indicator.parameters())
+        #     + list(self.matching_network.parameters())
+        #     + list(self.feature_predictor.parameters())
+        #     + list(self.angle_predictor.parameters())
+        #     , lr=args.lr)
         
         self.all_tuple = [
             ("encoder", self.encoder, self.encoder_optimizer),
             ("decoder", self.decoder, self.decoder_optimizer),
             ("critic", self.critic, self.critic_optimizer),
-            ("speaker_decoder", self.speaker_decoder, self.aux_optimizer),
-            ("progress_indicator", self.progress_indicator, self.aux_optimizer),
-            ("matching_network", self.matching_network, self.aux_optimizer),
-            ("feature_predictor", self.feature_predictor, self.aux_optimizer),
-            ("angle_predictor", self.angle_predictor, self.aux_optimizer)
+            # ("speaker_decoder", self.speaker_decoder, self.aux_optimizer),
+            # ("progress_indicator", self.progress_indicator, self.aux_optimizer),
+            # ("matching_network", self.matching_network, self.aux_optimizer),
+            # ("feature_predictor", self.feature_predictor, self.aux_optimizer),
+            # ("angle_predictor", self.angle_predictor, self.aux_optimizer)
         ]
 
         # Evaluations
@@ -909,7 +909,7 @@ class Seq2SeqAgent(BaseAgent):
         for model, optimizer in zip(self.models, self.optimizers):
             model.train()
             optimizer.zero_grad()
-        self.aux_optimizer.zero_grad()
+        # self.aux_optimizer.zero_grad()
 
     def accumulate_gradient(self, feedback='teacher', **kwargs):
         if feedback == 'teacher':
@@ -932,7 +932,7 @@ class Seq2SeqAgent(BaseAgent):
         self.encoder_optimizer.step()
         self.decoder_optimizer.step()
         self.critic_optimizer.step()
-        self.aux_optimizer.step()
+        # self.aux_optimizer.step()
 
     def train(self, n_iters, feedback='teacher', **kwargs):
         ''' Train for a given number of iterations '''
@@ -982,10 +982,7 @@ class Seq2SeqAgent(BaseAgent):
                 'state_dict': model.state_dict(),
                 'optimizer': optimizer.state_dict(),
             }
-        all_tuple = [("encoder", self.encoder, self.encoder_optimizer),
-                     ("decoder", self.decoder, self.decoder_optimizer),
-                     ("critic", self.critic, self.critic_optimizer)]
-        for param in all_tuple:
+        for param in self.all_tuple:
             create_state(*param)
         torch.save(states, path)
 
@@ -1002,10 +999,7 @@ class Seq2SeqAgent(BaseAgent):
             model.load_state_dict(state)
             if args.loadOptim:
                 optimizer.load_state_dict(states[name]['optimizer'])
-        all_tuple = [("encoder", self.encoder, self.encoder_optimizer),
-                     ("decoder", self.decoder, self.decoder_optimizer),
-                     ("critic", self.critic, self.critic_optimizer)]
-        for param in all_tuple:
+        for param in self.all_tuple:
             recover_state(*param)
         return states['encoder']['epoch'] - 1
 
