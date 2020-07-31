@@ -52,6 +52,17 @@ def load_nav_graphs(scans):
             graphs[scan] = G
     return graphs
 
+def progress_generator(mask):
+    mask = ~mask # [True, True, False]
+    counter = mask.clone()
+    counter = torch.sum(counter, dim=1).float()
+    unit = 1 / counter
+    progress = torch.ones_like(mask).cuda()
+    progress = torch.cumsum(progress, dim=1).float()
+    progress = progress * unit.unsqueeze(1).expand(mask.shape)
+    progress = progress * mask.float()
+    return progress
+
 def gt_words(obs):
     """
     See "utils.Tokenizer.encode_sentence(...)" for "instr_encoding" details

@@ -209,13 +209,14 @@ def train(train_env, tok, n_iters, log_every=100, val_envs={}, aug_env=None):
         rl_loss = sum(listner.logs['rl_loss']) / log_length
         ml_loss = sum(listner.logs['ml_loss']) / log_length
         spe_loss = sum(listner.logs['spe_loss']) / log_length
+        pro_loss = sum(listner.logs['pro_loss']) / log_length
         entropy = sum(listner.logs['entropy']) / log_length #/ length / args.batchSize
         # predict_loss = sum(listner.logs['us_loss']) / max(len(listner.logs['us_loss']), 1)
         writer.add_scalar("loss/rl_loss", rl_loss, idx)
         writer.add_scalar("loss/ml_loss", ml_loss, idx)
         writer.add_scalar("policy_entropy", entropy, idx)
         writer.add_scalar("loss/spe_loss", spe_loss, idx)
-        # writer.add_scalar("loss/pro_loss", pro_loss, idx)
+        writer.add_scalar("loss/pro_loss", pro_loss, idx)
         # writer.add_scalar("loss/mat_loss", mat_loss, idx)
         # writer.add_scalar("loss/fea_loss", fea_loss, idx)
         # writer.add_scalar("loss/ang_loss", ang_loss, idx)

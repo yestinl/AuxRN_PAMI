@@ -6,6 +6,61 @@ import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from param import args
 
+class ProgressIndicator(nn.Module):
+    def __init__(self):
+        super(ProgressIndicator, self).__init__()
+        hidden_size = args.rnn_dim
+        self.fc1 = nn.Linear(hidden_size, hidden_size)
+        self.relu1 = nn.LeakyReLU()
+        self.fc2 = nn.Linear(hidden_size, 1)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, h):
+        h = self.relu1(self.fc1(h))
+        h = self.sigmoid(self.fc2(h))
+        return h
+
+class MatchingNetwork(nn.Module):
+    def __init__(self):
+        super(MatchingNetwork, self).__init__()
+        hidden_size = args.rnn_dim
+        self.fc1 = nn.Linear(hidden_size * 3, hidden_size)
+        self.relu1 = nn.LeakyReLU()
+        self.fc2 = nn.Linear(hidden_size, 1)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, h):
+        h = self.relu1(self.fc1(h))
+        h = self.sigmoid(self.fc2(h))
+        # h = torch.mean(h, dim=1) # pooling, harm performance
+        return h
+
+class FeaturePredictor(nn.Module):
+    def __init__(self):
+        super(FeaturePredictor, self).__init__()
+        hidden_size = args.rnn_dim
+        self.fc1 = nn.Linear(hidden_size, hidden_size)
+        self.relu1 = nn.LeakyReLU()
+        self.fc2 = nn.Linear(hidden_size, args.feature_size)
+
+    def forward(self, h):
+        h = self.relu1(self.fc1(h))
+        h = self.fc2(h)
+        return h
+
+class AnglePredictor(nn.Module):
+    def __init__(self):
+        super(AnglePredictor, self).__init__()
+        hidden_size = args.rnn_dim
+        self.fc1 = nn.Linear(hidden_size, hidden_size)
+        self.relu1 = nn.LeakyReLU()
+        self.fc2 = nn.Linear(hidden_size, 4)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, h):
+        h = self.relu1(self.fc1(h))
+        h = self.sigmoid(self.fc2(h))
+        return h
 
 class EncoderLSTM(nn.Module):
     ''' Encodes navigation instructions, returning hidden state context (for
@@ -78,8 +133,6 @@ class EncoderLSTM(nn.Module):
         else:
             return ctx, decoder_init, c_t  # (batch, seq_len, hidden_size*num_directions)
                                  # (batch, hidden_size)
-
-
 
 
 class SoftDotAttention(nn.Module):

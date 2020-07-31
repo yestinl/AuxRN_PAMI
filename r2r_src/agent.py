@@ -102,7 +102,7 @@ class Seq2SeqAgent(BaseAgent):
         self.decoder = model.AttnDecoderLSTM(args.aemb, args.rnn_dim, args.dropout, feature_size=self.feature_size + args.angle_feat_size).cuda()
         self.critic = model.Critic().cuda()
         self.models = (self.encoder, self.decoder, self.critic)
-
+        
         if args.modspe:
             self.speaker_decoder = model.SpeakerDecoder_SameLSTM(self.tok.vocab_size(), args.wemb,
                                                              self.tok.word_to_index['<PAD>'], args.rnn_dim,
@@ -110,13 +110,17 @@ class Seq2SeqAgent(BaseAgent):
         else:
             self.speaker_decoder = model.SpeakerDecoder(self.tok.vocab_size(), args.wemb, self.tok.word_to_index['<PAD>'],
                                                         args.rnn_dim, args.dropout).cuda()
+        self.progress_indicator = model.ProgressIndicator().cuda()
+        self.matching_network = model.MatchingNetwork().cuda()
+        self.feature_predictor = model.FeaturePredictor().cuda()
+        self.angle_predictor = model.AnglePredictor().cuda()
         if args.upload:
             speaker_model = get_sync_dir('lyx/snap/speaker/state_dict/best_val_unseen_bleu')
         else:
             speaker_model = os.path.join(args.R2R_Aux_path, 'snap/speaker/state_dict/best_val_unseen_bleu')
         states = torch.load(speaker_model)
         self.speaker_decoder.load_state_dict(states["decoder"]["state_dict"])
-        self.aux_models = (self.speaker_decoder)
+        self.aux_models = (self.speaker_decoder, self.progress_indicator, self.matching_network)
 
         # Optimizers
         self.encoder_optimizer = args.optimizer(self.encoder.parameters(), lr=args.lr)
@@ -126,10 +130,10 @@ class Seq2SeqAgent(BaseAgent):
 
         self.aux_optimizer = args.optimizer(
             list(self.speaker_decoder.parameters())
-            # + list(self.progress_indicator.parameters())
-            # + list(self.matching_network.parameters())
-            # + list(self.feature_predictor.parameters())
-            # + list(self.angle_predictor.parameters())
+            + list(self.progress_indicator.parameters())
+            + list(self.matching_network.parameters())
+            + list(self.feature_predictor.parameters())
+            + list(self.angle_predictor.parameters())
             , lr=args.lr)
         
         self.all_tuple = [
@@ -137,16 +141,17 @@ class Seq2SeqAgent(BaseAgent):
             ("decoder", self.decoder, self.decoder_optimizer),
             ("critic", self.critic, self.critic_optimizer),
             ("speaker_decoder", self.speaker_decoder, self.aux_optimizer),
-            # ("progress_indicator", self.progress_indicator, self.aux_optimizer),
-            # ("matching_network", self.matching_network, self.aux_optimizer),
-            # ("feature_predictor", self.feature_predictor, self.aux_optimizer),
-            # ("angle_predictor", self.feature_predictor, self.aux_optimizer)
+            ("progress_indicator", self.progress_indicator, self.aux_optimizer),
+            ("matching_network", self.matching_network, self.aux_optimizer),
+            ("feature_predictor", self.feature_predictor, self.aux_optimizer),
+            ("angle_predictor", self.angle_predictor, self.aux_optimizer)
         ]
 
         # Evaluations
         self.losses = []
         self.criterion = nn.CrossEntropyLoss(ignore_index=args.ignoreid, size_average=False)
         self.softmax_loss = torch.nn.CrossEntropyLoss(ignore_index=self.tok.word_to_index['<PAD>'])
+        self.bce_loss = nn.BCELoss().cuda()
 
         # Logs
         sys.stdout.flush()
@@ -509,7 +514,7 @@ class Seq2SeqAgent(BaseAgent):
         eps = 1e-6
         if abs(args.speWeight - 0) > eps:
             if args.modspe:
-                logits = self.speaker_decoder(insts, v_ctx, decode_mask, ctx.detach())
+                logits = self.speaker_decoder(insts, v_ctx, decode_mask, ctx)
                 # logits = logits.permute(0, 2, 1).contiguous()
                 _logits = torch.zeros(logits.size(0), insts.size(1), logits.size(2)).cuda()
                 _logits[:, :logits.size(1), :logits.size(2)] = logits
@@ -528,6 +533,71 @@ class Seq2SeqAgent(BaseAgent):
             self.logs['spe_loss'].append(spe_loss.detach())
         else:
             self.logs['spe_loss'].append(0)
+    
+        # aux #2: progress indicator
+        if abs(args.proWeight - 0) > eps:
+            if args.modpro:
+                prob = self.progress_indicator(vl_ctx)
+                valid_mask = ~decode_mask
+                progress_label = utils.progress_generator(decode_mask)
+                pro_loss = F.binary_cross_entropy(prob.squeeze(), progress_label, reduce=False)
+                pro_loss = torch.mean(pro_loss * valid_mask.float()) * args.proWeight # mask out
+                self.loss += pro_loss
+                self.logs['pro_loss'].append(pro_loss.detach())
+            else:
+                prob = self.progress_indicator(vl_ctx)
+                progress_label = utils.progress_generator(decode_mask)
+                pro_loss = self.bce_loss(prob.squeeze(), progress_label)
+                pro_loss = pro_loss * args.proWeight
+                self.loss += pro_loss
+                self.logs['pro_loss'].append(pro_loss.detach())
+        else:
+            self.logs['pro_loss'].append(0)
+        
+        # aux #3: inst matching
+        if abs(args.matWeight - 0) > eps:
+            if args.modmat:
+                for i in range(v_ctx.shape[1]):
+                    if i == 0:
+                        h1 = v_ctx[:, i, :]
+                    else:
+                        _h1 = v_ctx[:, i, :]
+                        valid_mask = ~decode_mask[:, i] # True: move, False: already finished BEFORE THIS ACTION
+                        h1 = h1 * (1-valid_mask.float().unsqueeze(1)) + _h1 * valid_mask.float().unsqueeze(1) # update active feature
+                batch_size = h1.shape[0]
+                rand_idx = torch.randperm(batch_size)
+                order_idx = torch.arange(0, batch_size)
+                matching_mask = torch.empty(batch_size).random_(2).bool()
+                same_idx = rand_idx == order_idx
+                label = (matching_mask | same_idx).float().unsqueeze(1).cuda()  # 1 same, 0 different
+                # label_mask = ~decode_mask[:, i]
+                # label_mask = label_mask & label_mask[rand_idx]
+                new_h1 = label * h1 + (1 - label) * h1[rand_idx, :]
+                l_ctx = torch.cat((ctx[:,0,:], ctx[:,-1,:]), dim=1).detach()
+                vl_pair = torch.cat((new_h1, l_ctx), dim=1)
+                prob = self.matching_network(vl_pair)
+                mat_loss = F.binary_cross_entropy(prob, label) * args.matWeight
+                # mat_loss = F.binary_cross_entropy(prob, label, reduce=False) * args.matWeight
+                # mat_loss = torch.mean(mat_loss.squeeze() * label_mask.float())
+                self.loss += mat_loss
+            else:
+                h1 = v_ctx[:, -1, :]
+                batch_size = h1.shape[0]
+                rand_idx = torch.randperm(batch_size)
+                order_idx = torch.arange(0, batch_size)
+                matching_mask = torch.empty(batch_size).random_(2).bool()
+                same_idx = rand_idx == order_idx
+                label = (matching_mask | same_idx).float().unsqueeze(1).cuda()  # 1 same, 0 different
+                # label_mask = ~decode_mask[:, i]
+                # label_mask = label_mask & label_mask[rand_idx]
+                new_h1 = label * h1 + (1 - label) * h1[rand_idx, :]
+                l_ctx = torch.cat((ctx[:,0,:], ctx[:,-1,:]), dim=1).detach()
+                vl_pair = torch.cat((new_h1, l_ctx), dim=1)
+                prob = self.matching_network(vl_pair)
+                mat_loss = F.binary_cross_entropy(prob, label) * args.matWeight
+                self.loss += mat_loss
+        else:
+            self.logs['aux_loss3'].append(0)
 
         return traj
 
@@ -839,6 +909,7 @@ class Seq2SeqAgent(BaseAgent):
         for model, optimizer in zip(self.models, self.optimizers):
             model.train()
             optimizer.zero_grad()
+        self.aux_optimizer.zero_grad()
 
     def accumulate_gradient(self, feedback='teacher', **kwargs):
         if feedback == 'teacher':
@@ -861,6 +932,7 @@ class Seq2SeqAgent(BaseAgent):
         self.encoder_optimizer.step()
         self.decoder_optimizer.step()
         self.critic_optimizer.step()
+        self.aux_optimizer.step()
 
     def train(self, n_iters, feedback='teacher', **kwargs):
         ''' Train for a given number of iterations '''

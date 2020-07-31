@@ -56,6 +56,8 @@ class Param:
         self.parser.add_argument('--feaWeight', type=float, default=0)
         self.parser.add_argument('--angWeight', type=float, default=0)
         self.parser.add_argument("--modspe", action='store_const', default=False, const=True)
+        self.parser.add_argument("--modpro", action='store_const', default=False, const=True)
+        self.parser.add_argument("--modmat", action='store_const', default=False, const=True)
 
         # Training Configurations
         self.parser.add_argument('--optim', type=str, default='rms')    # rms, adam
