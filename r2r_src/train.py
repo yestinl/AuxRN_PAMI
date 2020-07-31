@@ -210,6 +210,9 @@ def train(train_env, tok, n_iters, log_every=100, val_envs={}, aug_env=None):
         ml_loss = sum(listner.logs['ml_loss']) / log_length
         spe_loss = sum(listner.logs['spe_loss']) / log_length
         pro_loss = sum(listner.logs['pro_loss']) / log_length
+        mat_loss = sum(listner.logs['mat_loss']) / log_length
+        fea_loss = sum(listner.logs['fea_loss']) / log_length
+        ang_loss = sum(listner.logs['ang_loss']) / log_length
         entropy = sum(listner.logs['entropy']) / log_length #/ length / args.batchSize
         # predict_loss = sum(listner.logs['us_loss']) / max(len(listner.logs['us_loss']), 1)
         writer.add_scalar("loss/rl_loss", rl_loss, idx)
@@ -217,9 +220,9 @@ def train(train_env, tok, n_iters, log_every=100, val_envs={}, aug_env=None):
         writer.add_scalar("policy_entropy", entropy, idx)
         writer.add_scalar("loss/spe_loss", spe_loss, idx)
         writer.add_scalar("loss/pro_loss", pro_loss, idx)
-        # writer.add_scalar("loss/mat_loss", mat_loss, idx)
-        # writer.add_scalar("loss/fea_loss", fea_loss, idx)
-        # writer.add_scalar("loss/ang_loss", ang_loss, idx)
+        writer.add_scalar("loss/mat_loss", mat_loss, idx)
+        writer.add_scalar("loss/fea_loss", fea_loss, idx)
+        writer.add_scalar("loss/ang_loss", ang_loss, idx)
         # writer.add_scalar("policy_entropy", entropy, idx)
         # writer.add_scalar("loss/unsupervised", predict_loss, idx)
         writer.add_scalar("total_actions", total, idx)

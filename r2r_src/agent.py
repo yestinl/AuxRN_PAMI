@@ -366,7 +366,6 @@ class Seq2SeqAgent(BaseAgent):
             # Supervised training
             target = self._teacher_action(perm_obs, ended)
             ml_loss += self.criterion(logit, target)
-
             # Determine next model inputs
             if self.feedback == 'teacher':
                 a_t = target                # teacher forcing
@@ -390,7 +389,7 @@ class Seq2SeqAgent(BaseAgent):
             # NOTE: Env action is in the perm_obs space
             cpu_a_t = a_t.cpu().numpy()
             for i, next_id in enumerate(cpu_a_t):
-                if next_id == (candidate_leng[i]-1) or next_id == args.ignoreid:    # The last action is <end>
+                if next_id == (candidate_leng[i]-1) or next_id == args.ignoreid or ended[i]:    # The last action is <end>
                     cpu_a_t[i] = -1             # Change the <end> and ignore action to -1
 
             # Make action and get the new state
@@ -429,6 +428,7 @@ class Seq2SeqAgent(BaseAgent):
             # Update the finished actions
             # -1 means ended or ignored (already ended)
             ended[:] = np.logical_or(ended, (cpu_a_t == -1))
+            print(ended)
 
             # Early exit if all ended
             if ended.all(): 
@@ -555,7 +555,7 @@ class Seq2SeqAgent(BaseAgent):
             self.logs['pro_loss'].append(0)
         
         # aux #3: inst matching
-        if abs(args.matWeight - 0) > eps:
+        if abs(args.matWeight - 0) > eps and not (args.no_train_rl and train_rl):
             if args.modmat:
                 for i in range(v_ctx.shape[1]):
                     if i == 0:
@@ -588,16 +588,20 @@ class Seq2SeqAgent(BaseAgent):
                 matching_mask = torch.empty(batch_size).random_(2).bool()
                 same_idx = rand_idx == order_idx
                 label = (matching_mask | same_idx).float().unsqueeze(1).cuda()  # 1 same, 0 different
-                # label_mask = ~decode_mask[:, i]
-                # label_mask = label_mask & label_mask[rand_idx]
                 new_h1 = label * h1 + (1 - label) * h1[rand_idx, :]
                 l_ctx = torch.cat((ctx[:,0,:], ctx[:,-1,:]), dim=1).detach()
                 vl_pair = torch.cat((new_h1, l_ctx), dim=1)
                 prob = self.matching_network(vl_pair)
                 mat_loss = F.binary_cross_entropy(prob, label) * args.matWeight
+                if args.mat_mask:
+                    label_mask = ~decode_mask[:, -1]
+                    label_mask = label_mask & label_mask[rand_idx]
+                    mat_loss = F.binary_cross_entropy(prob, label, reduce=False) * args.matWeight
+                    mat_loss = torch.mean(mat_loss.squeeze() * label_mask.float())
                 self.loss += mat_loss
+            self.logs['mat_loss'].append(mat_loss.detach())
         else:
-            self.logs['aux_loss3'].append(0)
+            self.logs['mat_loss'].append(0)
 
         return traj
 
