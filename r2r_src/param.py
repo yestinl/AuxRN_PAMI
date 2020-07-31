@@ -58,6 +58,8 @@ class Param:
         self.parser.add_argument("--modspe", action='store_const', default=False, const=True)
         self.parser.add_argument("--modpro", action='store_const', default=False, const=True)
         self.parser.add_argument("--modmat", action='store_const', default=False, const=True)
+        self.parser.add_argument("--modfea", action='store_const', default=False, const=True)
+        self.parser.add_argument("--mask_fea", action='store_const', default=False, const=True)
         self.parser.add_argument("--no_train_rl", action='store_const', default=False, const=True)
         self.parser.add_argument("--mat_mask", action='store_const', default=False, const=True)
 

@@ -59,7 +59,7 @@ class AnglePredictor(nn.Module):
 
     def forward(self, h):
         h = self.relu1(self.fc1(h))
-        h = self.sigmoid(self.fc2(h))
+        h = self.fc2(h)
         return h
 
 class EncoderLSTM(nn.Module):

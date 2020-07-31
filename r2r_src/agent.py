@@ -336,6 +336,8 @@ class Seq2SeqAgent(BaseAgent):
         v_ctx = [] # ctx before language att
         vl_ctx = [] # ctx after language att
         h1 = h_t
+        fea_loss = 0.
+        ang_loss = 0.
         for t in range(self.episode_len):
 
             input_a_t, f_t, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
@@ -366,6 +368,7 @@ class Seq2SeqAgent(BaseAgent):
             # Supervised training
             target = self._teacher_action(perm_obs, ended)
             ml_loss += self.criterion(logit, target)
+
             # Determine next model inputs
             if self.feedback == 'teacher':
                 a_t = target                # teacher forcing
@@ -425,10 +428,53 @@ class Seq2SeqAgent(BaseAgent):
             masks.append(mask)
             last_dist[:] = dist
 
+            
+            if args.modfea:
+                _mask = torch.from_numpy(mask).cuda().bool()
+                _mask = ~_mask # different definition
+                target_aux = target.clone()
+                target_aux[_mask] = 0
+                target_aux = target_aux.unsqueeze(1).unsqueeze(2)
+                target_aux = target_aux.expand(-1, 1, candidate_feat.size(2))
+                selected_feat = torch.gather(candidate_feat, 1, target_aux)
+                selected_feat = selected_feat.squeeze() # batch_size, feat_size
+                selected_feat[_mask] = 0
+                feature_label = selected_feat[:, :-args.angle_feat_size]
+                angle_label = selected_feat[:, -4:]
+                feature_pred = self.feature_predictor(h1)
+                angle_pred = self.angle_predictor(h1)
+                if args.mask_fea:
+                    fea_loss += torch.mean(F.mse_loss(feature_pred, feature_label, reduce=False) * _mask.unsqueeze(1))
+                    ang_loss += torch.mean(F.mse_loss(angle_pred, angle_label, reduce=False) * _mask.unsqueeze(1))
+                else:
+                    fea_loss += F.mse_loss(feature_pred, feature_label)
+                    ang_loss += F.mse_loss(angle_pred, angle_label)
+            else:
+                # old style
+                _mask = target == -100
+                target_aux = target.clone()
+                target_aux[_mask] = 0
+                target_aux = target_aux.unsqueeze(1).unsqueeze(2)
+                target_aux = target_aux.expand(-1, 1, candidate_feat.size(2))
+                selected_feat = torch.gather(candidate_feat, 1, target_aux)
+                selected_feat = selected_feat.squeeze() # batch_size, feat_size
+                selected_feat[_mask] = 0
+                feature_label = selected_feat[:, :-args.angle_feat_size]
+                angle_label = selected_feat[:, -4:]
+                feature_pred = self.feature_predictor(h1)
+                angle_pred = self.angle_predictor(h1)
+                fea_loss += F.mse_loss(feature_pred, feature_label)
+                ang_loss += F.mse_loss(angle_pred, angle_label)
+
             # Update the finished actions
             # -1 means ended or ignored (already ended)
             ended[:] = np.logical_or(ended, (cpu_a_t == -1))
-            print(ended)
+            
+            # print(t)
+            # print(ended)
+            # print(mask.astype(bool))
+            # print(_mask)
+            # import pdb; pdb.set_trace()
 
             # Early exit if all ended
             if ended.all(): 
@@ -602,6 +648,16 @@ class Seq2SeqAgent(BaseAgent):
             self.logs['mat_loss'].append(mat_loss.detach())
         else:
             self.logs['mat_loss'].append(0)
+        
+        # aux #4: feature prediction
+        fea_loss = fea_loss * args.feaWeight
+        self.loss += fea_loss
+        self.logs['fea_loss'].append(fea_loss.detach())
+
+        # aux #5: angle prediction
+        ang_loss = ang_loss * args.angWeight
+        self.loss += ang_loss
+        self.logs['ang_loss'].append(ang_loss.detach())
 
         return traj
 
@@ -986,10 +1042,7 @@ class Seq2SeqAgent(BaseAgent):
                 'state_dict': model.state_dict(),
                 'optimizer': optimizer.state_dict(),
             }
-        all_tuple = [("encoder", self.encoder, self.encoder_optimizer),
-                     ("decoder", self.decoder, self.decoder_optimizer),
-                     ("critic", self.critic, self.critic_optimizer)]
-        for param in all_tuple:
+        for param in self.all_tuple:
             create_state(*param)
         torch.save(states, path)
 
@@ -1006,10 +1059,7 @@ class Seq2SeqAgent(BaseAgent):
             model.load_state_dict(state)
             if args.loadOptim:
                 optimizer.load_state_dict(states[name]['optimizer'])
-        all_tuple = [("encoder", self.encoder, self.encoder_optimizer),
-                     ("decoder", self.decoder, self.decoder_optimizer),
-                     ("critic", self.critic, self.critic_optimizer)]
-        for param in all_tuple:
+        for param in self.all_tuple:
             recover_state(*param)
         return states['encoder']['epoch'] - 1
 
