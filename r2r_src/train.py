@@ -289,16 +289,24 @@ def valid(train_env, tok, val_envs={}):
         # agent.test(use_dropout=False, feedback='argmax', iters=iters)
         result = agent.get_results()
 
-        if args.v_vis_attn:
-            if env_name == 'val_unseen':
-                vis_attn_path = 'visualization/%s_vis_attn.npy'%env_name
-                np.save(vis_attn_path, agent.val_env_vis_attn)
+
+
         if env_name != '':
-            score_summary, _ = evaluator.score(result)
+            score_summary, scores = evaluator.score(result)
+            if args.v_vis_attn:
+                successes_list = [True for i in scores['nav_errors'] if i < 3]
+                with open('visualization/success_path_baseline.txt','w') as f:
+                    for i,item in enumerate(successes_list):
+                        if item:
+                            f.write(result[i]['instr_id']+'\n')
             loss_str = "Env name: %s" % env_name
             for metric,val in score_summary.items():
                 loss_str += ', %s: %.4f' % (metric, val)
             print(loss_str)
+        if args.v_vis_attn:
+            if env_name == 'val_unseen':
+                vis_attn_path = 'visualization/%s_vis_attn.npy'%env_name
+                np.save(vis_attn_path, agent.val_env_vis_attn)
 
         if args.submit:
             json.dump(

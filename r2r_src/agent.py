@@ -276,9 +276,7 @@ class Seq2SeqAgent(BaseAgent):
                     'instr_id': obs['instr_id'],
                     'scan': obs['scan'],
                     'viewpoint': obs['viewpoint'],
-                    'viewIndex': obs['viewIndex'],
-                    'instructions': obs['instructions'],
-                    'path_id': obs['path_id']
+                    'instructions': obs['instructions']
                 })
 
 
@@ -326,7 +324,8 @@ class Seq2SeqAgent(BaseAgent):
                     for i,vo in enumerate(visual_obs):
                         logits_f = logit_feat[:,0:12] + logit_feat[:,12:24] + logit_feat[:,24:36]
                         vo['view_attn'] = logits_f[i].detach().cpu().numpy()
-                        self.val_env_vis_attn[vo['instr_id']].append(vo)
+                        if not ended[i]:
+                            self.val_env_vis_attn[vo['instr_id']].append(vo)
             else:
                 h_t, c_t, logit, h1  = self.decoder(input_a_t, f_t, candidate_feat,
                                                    h_t, h1, c_t,
@@ -380,6 +379,16 @@ class Seq2SeqAgent(BaseAgent):
             self.make_equiv_action(cpu_a_t, perm_obs, perm_idx, traj)
             obs = np.array(self.env._get_obs())
             perm_obs = obs[perm_idx]                    # Perm the obs for the resu
+
+            if args.v_vis_attn:
+                visual_obs = []
+                for obs in perm_obs:
+                    visual_obs.append({
+                        'instr_id': obs['instr_id'],
+                        'scan': obs['scan'],
+                        'viewpoint': obs['viewpoint'],
+                        'instructions': obs['instructions']
+                    })
 
             # Calculate the mask and reward
             dist = np.zeros(batch_size, np.float32)
