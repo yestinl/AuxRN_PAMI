@@ -88,6 +88,10 @@ class Param:
         # visualization
         self.parser.add_argument("--v_vis_attn", action='store_const', default=False, const=True)
 
+        # Multi_head
+        self.parser.add_argument("--headNum", dest="headNum", type=int, default=2)
+        self.parser.add_argument("--multiMode", type=str, default="")  # vis,can,ins
+
         self.args = self.parser.parse_args()
 
         if self.args.optim == 'rms':
