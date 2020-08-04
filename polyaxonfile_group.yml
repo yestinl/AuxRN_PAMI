@@ -3,10 +3,10 @@ kind: group
 build:
     image: docker.dm-ai.cn/algorithm-research/matteraux:latest
 hptuning:
-    concurrency: 15
+    concurrency: 6
     matrix:
         headNum:
-            values: [1,2,3,4,8]
+            values: [1,2]
         multiMode:
             values: [vis,ins,can]
 environment:
