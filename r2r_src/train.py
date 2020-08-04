@@ -295,7 +295,7 @@ def valid(train_env, tok, val_envs={}):
             score_summary, scores = evaluator.score(result)
             if args.v_vis_attn:
                 successes_list = [True for i in scores['nav_errors'] if i < 3]
-                with open('visualization/success_path_baseline.txt','w') as f:
+                with open('visualization/success_path_vis_2.txt','w') as f:
                     for i,item in enumerate(successes_list):
                         if item:
                             f.write(result[i]['instr_id']+'\n')
@@ -305,7 +305,7 @@ def valid(train_env, tok, val_envs={}):
             print(loss_str)
         if args.v_vis_attn:
             if env_name == 'val_unseen':
-                vis_attn_path = 'visualization/%s_vis_attn.npy'%env_name
+                vis_attn_path = 'visualization/%s_vis_2_attn.npy'%env_name
                 np.save(vis_attn_path, agent.val_env_vis_attn)
 
         if args.submit:

@@ -180,7 +180,8 @@ class MultiHeadSelfAttention(nn.Module):
         output_attn = torch.stack(append_attn)
 
         output_logit = output_logit.mean(dim=0)
-        output_attn = output_attn.mean(dim=0)
+        if not args.v_vis_attn:
+            output_attn = output_attn.mean(dim=0)
 
         if not output_prob:
             output_attn = output_logit
