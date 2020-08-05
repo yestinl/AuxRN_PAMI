@@ -63,6 +63,9 @@ class Param:
         self.parser.add_argument("--mask_fea", action='store_const', default=False, const=True)
         self.parser.add_argument("--no_train_rl", action='store_const', default=False, const=True)
         self.parser.add_argument("--mat_mask", action='store_const', default=False, const=True)
+        self.parser.add_argument("--mat_detach", action='store_const', default=False, const=True)
+        self.parser.add_argument("--mat_norm", action='store_const', default=False, const=True)
+        self.parser.add_argument("--mat_mul", action='store_const', default=False, const=True)
 
         # Training Configurations
         self.parser.add_argument('--optim', type=str, default='rms')    # rms, adam

@@ -568,7 +568,7 @@ class Seq2SeqAgent(BaseAgent):
             eps = 1e-6
             if abs(args.speWeight - 0) > eps:
                 if args.modspe:
-                    logits = self.speaker_decoder(insts, v_ctx, decode_mask, ctx)
+                    logits = self.speaker_decoder(insts, v_ctx, decode_mask, ctx)#########
                     # logits = logits.permute(0, 2, 1).contiguous()
                     _logits = torch.zeros(logits.size(0), insts.size(1), logits.size(2)).cuda()
                     _logits[:, :logits.size(1), :logits.size(2)] = logits
@@ -624,16 +624,29 @@ class Seq2SeqAgent(BaseAgent):
                     matching_mask = torch.empty(batch_size).random_(2).bool()
                     same_idx = rand_idx == order_idx
                     label = (matching_mask | same_idx).float().unsqueeze(1).cuda()  # 1 same, 0 different
-                    # label_mask = ~decode_mask[:, i]
-                    # label_mask = label_mask & label_mask[rand_idx]
+                    if args.mat_detach:
+                        l_ctx = ctx[:,0,:].detach()
+                        # l_ctx = torch.cat((ctx[:,0,:], ctx[:,-1,:]), dim=1).detach()
+                    else:
+                        # l_ctx = torch.cat((ctx[:,0,:], ctx[:,-1,:]), dim=1)
+                        l_ctx = ctx[:,0,:]
                     new_h1 = label * h1 + (1 - label) * h1[rand_idx, :]
-                    l_ctx = torch.cat((ctx[:,0,:], ctx[:,-1,:]), dim=1).detach()
-                    vl_pair = torch.cat((new_h1, l_ctx), dim=1)
-                    prob = self.matching_network(vl_pair)
+                    new_l_ctx = label * l_ctx + (1 - label) * l_ctx[rand_idx, :]
+                    # vl_pair = torch.cat((new_h1, h1), dim=1)
+                    # vl_pair = torch.cat((new_l_ctx, l_ctx), dim=1)
+                    prob = self.matching_network(new_h1, l_ctx)
+                    prob1 = self.matching_network(new_h1, h1)
+                    prob2 = self.matching_network(new_l_ctx, l_ctx)
                     mat_loss = F.binary_cross_entropy(prob, label) * args.matWeight
+                    mat_loss1 = F.binary_cross_entropy(prob1, label) * args.matWeight
+                    mat_loss2 = F.binary_cross_entropy(prob2, label) * args.matWeight
+                    # print(prob)
+                    # print(mat_loss)
+                    # print(mat_loss1)
+                    # print(mat_loss2)
                     # mat_loss = F.binary_cross_entropy(prob, label, reduce=False) * args.matWeight
                     # mat_loss = torch.mean(mat_loss.squeeze() * label_mask.float())
-                    self.loss += mat_loss
+                    self.loss += mat_loss + mat_loss1 + mat_loss2
                 else:
                     h1 = v_ctx[:, -1, :]
                     batch_size = h1.shape[0]
@@ -643,7 +656,7 @@ class Seq2SeqAgent(BaseAgent):
                     same_idx = rand_idx == order_idx
                     label = (matching_mask | same_idx).float().unsqueeze(1).cuda()  # 1 same, 0 different
                     new_h1 = label * h1 + (1 - label) * h1[rand_idx, :]
-                    l_ctx = torch.cat((ctx[:,0,:], ctx[:,-1,:]), dim=1).detach()
+                    l_ctx = ctx[:,0,:].detach()
                     vl_pair = torch.cat((new_h1, l_ctx), dim=1)
                     prob = self.matching_network(vl_pair)
                     mat_loss = F.binary_cross_entropy(prob, label) * args.matWeight

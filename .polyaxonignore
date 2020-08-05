@@ -15,3 +15,6 @@ tasks
 img_features
 snap
 semantic_views
+cmake
+pybind11
+build
