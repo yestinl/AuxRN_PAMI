@@ -89,12 +89,66 @@ class EnvBatch():
         for i, (index, heading, elevation) in enumerate(actions):
             self.sims[i].makeAction(index, heading, elevation)
 
+class ObjEnvBatch(EnvBatch):
+    def __init__(self, feature_store=None,obj_d_feat = None,obj_s_feat=None,batch_size=100):
+        """
+        1. Load pretrained image feature
+        2. Init the Simulator.
+        :param feature_store: The name of file stored the feature.
+        :param batch_size:  Used to create the simulator list.
+        """
+        super(ObjEnvBatch, self).__init__(feature_store, batch_size)
+        if obj_d_feat is not None:
+           self.obj_d_feat = obj_d_feat
+        else:
+           self.obj_d_feat = None
+        if obj_s_feat is not None:
+            self.obj_s_feat = obj_s_feat
+        else:
+            self.obj_s_feat = None
+        # self.obj_d_feat = obj_d_feat
+    def getStates(self):
+        """
+        Get list of states augmented with precomputed image features. rgb field will be empty.
+        Agent's current view [0-35] (set only when viewing angles are discretized)
+            [0-11] looking down, [12-23] looking at horizon, [24-35] looking up
+        :return: [ ((30, 2048), sim_state) ] * batch_size
+        """
+        feature_states = []
+        obj_d_feat_states = []
+        obj_s_feat_states = []
+        for i, sim in enumerate(self.sims):
+            state = sim.getState()
+
+            long_id = self._make_id(state.scanId, state.location.viewpointId)
+            if self.features:
+                feature = self.features[long_id]     # Get feature for
+                feature_states.append((feature, state))
+            else:
+                feature_states.append((None, state))
+            if self.obj_d_feat:
+                obj_d_feat = self.obj_d_feat[long_id]
+                obj_d_feat_states.append(obj_d_feat)
+            else:
+                obj_d_feat_states.append(None)
+            if self.obj_s_feat:
+                obj_s_feat = self.obj_s_feat[long_id]
+                obj_s_feat_states.append(obj_s_feat)
+            else:
+                obj_s_feat_states.append(None)
+        return feature_states, obj_d_feat_states, obj_s_feat_states
+
+
 class R2RBatch():
     ''' Implements the Room to Room navigation task, using discretized viewpoints and pretrained features '''
 
-    def __init__(self, feature_store, batch_size=100, seed=10, splits=['train'], tokenizer=None,
-                 name=None):
-        self.env = EnvBatch(feature_store=feature_store, batch_size=batch_size)
+    def __init__(self, feature_store, obj_d_feat=None, obj_s_feat=None, batch_size=100, seed=10, splits=['train'],
+                 tokenizer=None, name=None):
+        if obj_d_feat or obj_s_feat:
+            self.env = ObjEnvBatch(feature_store=feature_store, obj_d_feat=obj_d_feat, obj_s_feat=obj_s_feat,
+                                   batch_size=batch_size)
+        else:
+            self.env = EnvBatch(feature_store=feature_store, batch_size=batch_size)
         if feature_store:
             self.feature_size = self.env.feature_size
         self.data = []
@@ -131,6 +185,7 @@ class R2RBatch():
         self._load_nav_graphs()
 
         self.angle_feature = utils.get_all_point_angle_feature()
+        self.angle_avg_feature = utils.get_avg_point_angle_feature()
         self.sim = utils.new_simulator()
         self.buffered_state_dict = {}
 
@@ -272,7 +327,19 @@ class R2RBatch():
 
     def _get_obs(self):
         obs = []
-        for i, (feature, state) in enumerate(self.env.getStates()):
+        # for i, (feature, state) in enumerate(self.env.getStates()):
+        if args.sparseObj or args.denseObj:
+            F, obj_d_feat, obj_s_feat = self.env.getStates()
+        else:
+            F = self.env.getStates()
+        for i in range(len(F)):
+            feature = F[i][0]
+            state = F[i][1]
+            # odf = obj_d_feat[i]
+            if args.sparseObj:
+                osf = obj_s_feat[i]
+            if args.denseObj:
+                odf = obj_d_feat[i]
             item = self.batch[i]
             base_view_id = state.viewIndex
 
@@ -281,7 +348,7 @@ class R2RBatch():
 
             # (visual_feature, angel_feature) for views
             feature = np.concatenate((feature, self.angle_feature[base_view_id]), -1)
-            obs.append({
+            obs_dict = {
                 'instr_id' : item['instr_id'],
                 'scan' : state.scanId,
                 'viewpoint' : state.location.viewpointId,
@@ -294,7 +361,71 @@ class R2RBatch():
                 'instructions' : item['instructions'],
                 'teacher' : self._shortest_path_action(state, item['path'][-1]),
                 'path_id' : item['path_id']
-            })
+            }
+            if args.denseObj:
+                if args.catfeat == 'none':
+                    obs_dict['obj_d_feature'] = odf['concat_feature']
+                elif args.catfeat =='bboxAngle': # concat bbox 2d coordinates & vision_angle_feature
+                    if odf['concat_text'][0] == 'zero':
+                        obs_dict['obj_d_feature'] = np.concatenate(
+                            (odf['concat_feature'], np.zeros((1,args.angle_feat_size))),axis=1)
+                    elif odf['concat_text'][0] == 'average':
+                        obs_dict['obj_d_feature'] = np.concatenate(
+                            (odf['concat_feature'], np.tile(odf['concat_bbox'], (args.angle_feat_size/2)//4),
+                             np.expand_dims(self.angle_avg_feature[base_view_id][:args.angle_feat_size/2], axis=0)), axis=1)
+                    else:
+                        obs_dict['obj_d_feature'] = np.zeros((len(odf['concat_feature']), args.angle_feat_size
+                                                              +args.feature_size))
+                        for k,v in enumerate(odf['concat_viewIndex']):
+                            obs_dict['obj_d_feature'][k] = np.concatenate(
+                                (odf['concat_feature'][k], np.tile(odf['concat_bbox'][k], (args.angle_feat_size/2)//4),
+                                 self.angle_feature[base_view_id][v][:args.angle_feat_size/2]))
+                elif args.catfeat == 'bbox': # concat bbox 2d coordinates
+                    if odf['concat_text'][0] == 'zero':
+                        obs_dict['obj_d_feature'] = np.concatenate(
+                            (odf['concat_feature'], np.zeros((1,args.angle_feat_size))), axis=1)
+                    elif odf['concat_text'][0] == 'average':
+                        obs_dict['obj_d_feature'] = np.concatenate(
+                            (odf['concat_feature'],np.tile(odf['concat_bbox'], args.angle_feat_size//4)),axis=1)
+                    else:
+                        obs_dict['obj_d_feature'] = np.zeros(
+                            (len(odf['concat_feature']), args.angle_feat_size + args.feature_size))
+                        for k, v in enumerate(odf['concat_viewIndex']):
+                            obs_dict['obj_d_feature'][k] = np.concatenate(
+                                (odf['concat_feature'][k], np.tile(odf['concat_bbox'][k], args.angle_feat_size // 4)))
+                elif args.catfeat == 'angle': # concat vision_angle_feature
+                    if odf['concat_text'][0] == 'zero':
+                        obs_dict['obj_d_feature'] = np.concatenate(
+                            (odf['concat_feature'], np.zeros((1, args.angle_feat_size))), axis=1)
+                    elif odf['concat_text'][0] == 'average':
+                        obs_dict['obj_d_feature'] = np.concatenate(
+                            (odf['concat_feature'], np.expand_dims(self.angle_avg_feature[base_view_id], axis=0)),
+                            axis=1)
+                    else:
+                        obs_dict['obj_d_feature'] = np.zeros(
+                            (len(odf['concat_feature']), args.angle_feat_size + args.feature_size))
+                        for k, v in enumerate(odf['concat_viewIndex']):
+                            obs_dict['obj_d_feature'][k] = np.concatenate(
+                                (odf['concat_feature'][k], self.angle_feature[base_view_id][v]))
+                elif args.catfeat == 'he': # concat bbox2angle
+                    if odf['concat_text'][0] == 'zero':
+                        obs_dict['obj_d_feature'] = np.concatenate(
+                            (odf['concat_feature'], np.zeros((1, args.angle_feat_size))), axis=1)
+                    elif odf['concat_text'][0] == 'average':
+                        # he = np.tile(np.concatenate((odf['concat_angles_h'],odf['concat_angles_e']),axis=1),args.angle_feat_size//8)
+                        he = odf['concat_angles']
+                        obs_dict['obj_d_feature'] = np.concatenate(
+                            (odf['concat_feature'], he), 1)
+                    else:
+                        obs_dict['obj_d_feature'] = np.zeros(
+                            (len(odf['concat_feature']), args.angle_feat_size + args.feature_size))
+                        for k, v in enumerate(odf['concat_viewIndex']):
+                            # he = np.tile(np.concatenate((odf['concat_angles_h'][k], odf['concat_angles_e'][k])),
+                            #              args.angle_feat_size // 8)
+                            he = odf['concat_angles'][k]
+                            obs_dict['obj_d_feature'][k] = np.concatenate(
+                                (odf['concat_feature'][k], he))
+            obs.append(obs_dict)
             if 'instr_encoding' in item:
                 obs[-1]['instr_encoding'] = item['instr_encoding']
             # A2C reward. The negative distance between the state and the final state

@@ -139,10 +139,27 @@ class Seq2SeqAgent(BaseAgent):
 
     def _feature_variable(self, obs):
         ''' Extract precomputed features into variable. '''
-        features = np.empty((len(obs), args.views, self.feature_size + args.angle_feat_size), dtype=np.float32)
-        for i, ob in enumerate(obs):
-            features[i, :, :] = ob['feature']   # Image feat
-        return Variable(torch.from_numpy(features), requires_grad=False).cuda()
+        if args.denseObj and not args.sparseObj:
+            Obj_leng = [ob['obj_d_feature'].shape[0] for ob in obs]
+            if args.catfeat == 'none':
+                denseObj = np.zeros((len(obs), max(Obj_leng), args.feature_size),
+                                    dtype=np.float32)
+            else:
+                denseObj = np.zeros((len(obs), max(Obj_leng), args.feature_size+args.angle_feat_size),
+                                    dtype=np.float32)
+            for i,ob in enumerate(obs):
+                denseObj[i, :Obj_leng[i], :] = ob['obj_d_feature']
+            features = np.empty((len(obs), args.views, self.feature_size+args.angle_feat_size),
+                                dtype=np.float32)
+            for i,ob in enumerate(obs):
+                features[i, :, :] = ob['feature']
+            return Variable(torch.from_numpy(denseObj), requires_grad=False).cuda(), Obj_leng, Variable(
+                    torch.from_numpy(features), requires_grad=False).cuda()
+        else:
+            features = np.empty((len(obs), args.views, self.feature_size + args.angle_feat_size), dtype=np.float32)
+            for i, ob in enumerate(obs):
+                features[i, :, :] = ob['feature']   # Image feat
+            return Variable(torch.from_numpy(features), requires_grad=False).cuda()
 
     def _candidate_variable(self, obs):
         candidate_leng = [len(ob['candidate']) + 1 for ob in obs]       # +1 is for the end
@@ -159,10 +176,12 @@ class Seq2SeqAgent(BaseAgent):
         for i, ob in enumerate(obs):
             input_a_t[i] = utils.angle_feature(ob['heading'], ob['elevation'])
         input_a_t = torch.from_numpy(input_a_t).cuda()
-
-        f_t = self._feature_variable(obs)      # Image features from obs
         candidate_feat, candidate_leng = self._candidate_variable(obs)
-
+        # if args.denseObj and (not args.sparseObj):
+        #     denseObj, Obj_leng, features = self._feature_variable(obs)
+        #     return input_a_t, denseObj, Obj_leng, features, candidate_feat, candidate_leng
+        # else:
+        f_t = self._feature_variable(obs)      # Image features from obs
         return input_a_t, f_t, candidate_feat, candidate_leng
 
     def _teacher_action(self, obs, ended):
@@ -294,15 +313,33 @@ class Seq2SeqAgent(BaseAgent):
 
         h1 = h_t
         for t in range(self.episode_len):
+            ObjFeature_mask = None
+            sparseObj = None
+            denseObj = None
+            f_t = None
+            Obj_leng = None
+            input_a_t, f_t_tuple, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
+            if args.denseObj and (not args.sparseObj):
+                denseObj, Obj_leng, f_t = f_t_tuple
+            else:
+                f_t = f_t_tuple
 
-            input_a_t, f_t, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
+            if Obj_leng is not None:
+                ObjFeature_mask = utils.length2mask(Obj_leng)
             if speaker is not None:       # Apply the env drop mask to the feat
                 candidate_feat[..., :-args.angle_feat_size] *= noise
                 f_t[..., :-args.angle_feat_size] *= noise
+                if args.denseObj:
+                    if args.catfeat == 'none':
+                        denseObj *=noise
+                    else:
+                        denseObj[...,:-args.angle_feat_size] *=noise
 
-            h_t, c_t, logit, h1 = self.decoder(input_a_t, f_t, candidate_feat,
-                                               h_t, h1, c_t,
-                                               ctx, ctx_mask,
+            h_t, c_t, logit, h1 = self.decoder(input_a_t,candidate_feat,
+                                               h1, c_t,
+                                               ctx, ctx_mask,feature=f_t,
+                                               sparseObj=sparseObj,denseObj=denseObj,
+                                               ObjFeature_mask=ObjFeature_mask,
                                                already_dropfeat=(speaker is not None))
 
             hidden_states.append(h_t)
@@ -391,14 +428,32 @@ class Seq2SeqAgent(BaseAgent):
 
         if train_rl:
             # Last action in A2C
-            input_a_t, f_t, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
+            ObjFeature_mask = None
+            sparseObj = None
+            denseObj = None
+            f_t = None
+            Obj_leng = None
+            input_a_t, f_t_tuple, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
+            if args.denseObj and (not args.sparseObj):
+                denseObj, Obj_leng, f_t = f_t_tuple
+            else:
+                f_t = f_t_tuple
+            if Obj_leng is not None:
+                ObjFeature_mask = utils.length2mask(Obj_leng)
             if speaker is not None:
                 candidate_feat[..., :-args.angle_feat_size] *= noise
                 f_t[..., :-args.angle_feat_size] *= noise
-            last_h_, _, _, _ = self.decoder(input_a_t, f_t, candidate_feat,
-                                            h_t, h1, c_t,
-                                            ctx, ctx_mask,
-                                            speaker is not None)
+                if args.denseObj:
+                    if args.catfeat == 'none':
+                        denseObj * noise
+                    else:
+                        denseObj[...,:-args.angle_feat_size] * noise
+            last_h_, _, _, _ = self.decoder(input_a_t,candidate_feat,
+                                               h1, c_t,
+                                               ctx, ctx_mask,feature=f_t,
+                                               sparseObj=sparseObj,denseObj=denseObj,
+                                               ObjFeature_mask=ObjFeature_mask,
+                                               already_dropfeat=(speaker is not None))
             rl_loss = 0.
 
             # NOW, A2C!!!
@@ -574,7 +629,7 @@ class Seq2SeqAgent(BaseAgent):
 
             # Update the dijk graph's states with the newly visited viewpoint
             candidate_mask = utils.length2mask(candidate_leng)
-            logit.masked_fill_(candidate_mask, -float('inf'))
+            logit.masked_fill_(candidate_mask.bool(), -float('inf'))
             log_probs = F.log_softmax(logit, 1)                              # Calculate the log_prob here
             _, max_act = log_probs.max(1)
 

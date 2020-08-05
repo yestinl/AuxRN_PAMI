@@ -47,10 +47,10 @@ if args.upload:
     log_dir = os.path.join(output_dir, "snap", args.name)
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
-    # sparse_obj_feat = get_sync_dir(os.path.join(args.upload_path, args.SPARSE_OBJ_FEATURES))
-    # dense_obj_feat1 = get_sync_dir(os.path.join(args.upload_path, args.DENSE_OBJ_FEATURES1))
-    # dense_obj_feat2 = get_sync_dir(os.path.join(args.upload_path, args.DENSE_OBJ_FEATURES2))
-    # bbox = get_sync_dir(os.path.join(args.upload_path, args.BBOX_FEATURES))
+    sparse_obj_feat = get_sync_dir(os.path.join(args.upload_path, args.SPARSE_OBJ_FEATURES))
+    dense_obj_feat1 = get_sync_dir(os.path.join(args.upload_path, args.DENSE_OBJ_FEATURES1))
+    dense_obj_feat2 = get_sync_dir(os.path.join(args.upload_path, args.DENSE_OBJ_FEATURES2))
+    bbox = get_sync_dir(os.path.join(args.upload_path, args.BBOX_FEATURES))
 
 else:
     train_vocab = os.path.join(args.R2R_Aux_path,args.TRAIN_VOCAB)
@@ -59,10 +59,10 @@ else:
     log_dir = 'snap/%s' % args.name
     if not os.path.exists(log_dir):
         os.makedirs(log_dir)
-    # sparse_obj_feat = os.path.join(args.R2R_Aux_path, args.SPARSE_OBJ_FEATURES)
-    # dense_obj_feat1 = os.path.join(args.R2R_Aux_path, args.DENSE_OBJ_FEATURES1)
-    # dense_obj_feat2 = os.path.join(args.R2R_Aux_path, args.DENSE_OBJ_FEATURES2)
-    # bbox = os.path.join(args.R2R_Aux_path, args.BBOX_FEATURES)
+    sparse_obj_feat = os.path.join(args.R2R_Aux_path, args.SPARSE_OBJ_FEATURES)
+    dense_obj_feat1 = os.path.join(args.R2R_Aux_path, args.DENSE_OBJ_FEATURES1)
+    dense_obj_feat2 = os.path.join(args.R2R_Aux_path, args.DENSE_OBJ_FEATURES2)
+    bbox = os.path.join(args.R2R_Aux_path, args.BBOX_FEATURES)
 
 if args.fast_train:
     name, ext = os.path.splitext(features)
@@ -228,6 +228,7 @@ def train(train_env, tok, n_iters, log_every=100, val_envs={}, aug_env=None):
             loss_str += "%s " % env_name
             for metric,val in score_summary.items():
                 if metric in ['success_rate']:
+                    loss_str += ', %s: %.3f' % (metric, val)
                     writer.add_scalar("%s/accuracy" % env_name, val, idx)
                     if env_name in best_val:
                         if val > best_val[env_name]['accu']:
@@ -235,7 +236,7 @@ def train(train_env, tok, n_iters, log_every=100, val_envs={}, aug_env=None):
                             best_val[env_name]['update'] = True
                 if metric in ['spl']:
                     writer.add_scalar("%s/spl" % env_name, val, idx)
-                loss_str += ', %s: %.3f' % (metric, val)
+                    loss_str += ', %s: %.3f' % (metric, val)
             loss_str += '\n'
         loss_str += '\n'
 
@@ -406,9 +407,19 @@ def train_val():
 
     feat_dict = read_img_features(features)
 
+    # load object feature
+    obj_s_feat = None
+    if args.sparseObj:
+        obj_s_feat = utils.read_obj_sparse_features(sparse_obj_feat, args.objthr)
+
+    obj_d_feat = None
+    if args.denseObj:
+        obj_d_feat = utils.read_obj_dense_features(dense_obj_feat1, dense_obj_feat2, bbox, sparse_obj_feat, args.objthr)
+
     featurized_scans = set([key.split("_")[0] for key in list(feat_dict.keys())])
 
-    train_env = R2RBatch(feat_dict, batch_size=args.batchSize, splits=['train'], tokenizer=tok)
+    train_env = R2RBatch(feat_dict, obj_d_feat=obj_d_feat, obj_s_feat=obj_s_feat, batch_size=args.batchSize,
+                         splits=['train'], tokenizer=tok)
     from collections import OrderedDict
 
     val_env_names = ['val_unseen', 'val_seen']
@@ -423,7 +434,8 @@ def train_val():
 
     val_envs = OrderedDict(
         ((split,
-          (R2RBatch(feat_dict, batch_size=args.batchSize, splits=[split], tokenizer=tok),
+          (R2RBatch(feat_dict, obj_d_feat=obj_d_feat, obj_s_feat=obj_s_feat, batch_size=args.batchSize, splits=[split],
+                    tokenizer=tok),
            Evaluation([split], featurized_scans, tok))
           )
          for split in val_env_names
