@@ -279,55 +279,70 @@ def read_obj_dense_features(dense_obj_feat1, dense_obj_feat2, bbox, sparse_obj_f
     sum_bbox = np.zeros(4)
     sum_e = np.zeros(4)
     sum_h = np.zeros(4)
+    sum_angle = np.zeros(128)
     obj_num = 0
     none_num = 0
-
-    # calculate the average feature&bbox for padding
-    for n,(scanId, viewpointId) in enumerate(viewpointIds):
+    for n, (scanId, viewpointId) in enumerate(viewpointIds):
         long_id = scanId + '_' + viewpointId
         if len(obj_d_feat[long_id]['concat_prob']) > 0:
-            for i,feat in enumerate(obj_d_feat[long_id]['concat_feature']):
+            for i, feat in enumerate(obj_d_feat[long_id]['concat_feature']):
                 if obj_d_feat[long_id]['concat_prob'][i] < th:
                     continue
                 sum_feature += feat
-                assert  bbox_feat[long_id]['concat_viewIndex'] == obj_d_feat[long_id]['concat_viewIndex']
-                sum_bbox += bbox_feat[long_id]['concat_bbox'][i]
-                sum_h += obj_s_feat[long_id]['concat_angles_h'][i]
-                sum_e += obj_s_feat[long_id]['concat_angles_e'][i]
+                assert bbox_feat[long_id]['concat_viewIndex']==obj_d_feat[long_id]['concat_viewIndex']
+                sum_bbox = bbox_feat[long_id]['concat_bbox'][i]
+
+
+
+                # sum_e += obj_s_feat[long_id]['concat_angles_e'][i]
+                # sum_h += obj_s_feat[long_id]['concat_angles_h'][i]
+
                 obj_num +=1
     avg_feature = sum_feature/obj_num
     avg_b = sum_bbox/obj_num
     avg_e = sum_e/obj_num
     avg_h = sum_h/obj_num
-    avg_angle = obj_rad2reg_feature(avg_e, avg_h)
+
     objs = {}
     for n, (scanId, viewpointId) in enumerate(viewpointIds):
         long_id = scanId + '_' + viewpointId
         flag = 0
         viewpoint_object = []
-        for bb,bb_viewIndex, features, txt, viewIndex, prob, angles_h, angles_e in zip(
-            bbox_feat[long_id]['concat_bbox'], bbox_feat[long_id]['concat_viewIndex'],
-            obj_d_feat[long_id]['concat_feature'], obj_d_feat[long_id]['concat_text'],
-            obj_d_feat[long_id]['concat_viewIndex'], obj_d_feat[long_id]['concat_prob'],
-            obj_s_feat[long_id]['concat_angles_h'], obj_s_feat[long_id]['concat_angles_e']
+        for bb,bb_viewIndex,features,txt,viewIndex,prob,angles_h,angles_e  in zip(
+            bbox_feat[long_id]['concat_bbox'],bbox_feat[long_id]['concat_viewIndex'],
+            obj_d_feat[long_id]['concat_feature'],obj_d_feat[long_id]['concat_text'],
+            obj_d_feat[long_id]['concat_viewIndex'],obj_d_feat[long_id]['concat_prob'],
+            obj_s_feat[long_id]['concat_angles_h'], obj_s_feat[long_id]['concat_angles_e'],
         ):
             if prob < th:
                 continue
             assert bb_viewIndex == viewIndex
-            flag = 1
+            # t = txt.split()
+            # if len(t) == 1:
+            #     if t[0] == 'wall' or t[0] == 'ceiling':
+            #         continue
+            # elif t[1] == 'wall' or t[1] == 'ceiling':
+            #     continue
+            # if len(t) == 1:
+            #     txt = t[0]
+            # else:
+            #     txt = t[0] + ' ' + t[1]
             angles = obj_rad2reg_feature(angles_h, angles_e)
-            viewpoint_object.append({'bbox':bb,'angles': angles, 'features': features,
-                                     'text': txt, 'viewIndex': viewIndex, 'prob': prob})
-        if not flag and (th!=1): # thresh out and pad average feature
-            viewpoint_object.append({'bbox':avg_b, 'angles': avg_angle, 'features': avg_feature,
-                                     'text': 'average', 'viewIndex':None, 'prob': None})
-            none_num += 1
+            flag = 1
+            viewpoint_object.append({'bbox':bb,'angles': angles,'features': features,
+                                  'text': txt,'viewIndex': viewIndex,'prob': prob})
+        if not flag and (th != 1):
+            viewpoint_object.append({'bbox':avg_b,'angles': np.zeros(128), 'features': avg_feature,
+                                  'text': 'average', 'viewIndex': None, 'prob': None})
+            none_num +=1
         if th == 1:
-            viewpoint_object.append({'bbox': np.zeros(4),'angles': np.zeros(128), 'features': np.zeros(2048),
+            viewpoint_object.append({'bbox': np.zeros(4),'angles': np.zeros(128),'features': np.zeros(2048),
                                      'text': 'zero', 'viewIndex': None, 'prob': None})
-            none_num += 1
+            none_num +=1
         num_obj = len(viewpoint_object)
-        concat_angles = np.zeros((num_obj,128), np.float32)
+        # concat_angles_h = np.zeros((num_obj, 4), np.float32)
+        # concat_angles_e = np.zeros((num_obj, 4), np.float32)
+        concat_angles = np.zeros((num_obj, 128), np.float32)
         concat_bbox = np.zeros((num_obj, 4), np.float32)
         concat_dense_feature = np.zeros((num_obj, 2048))
         concat_text = [None] * num_obj
@@ -348,10 +363,13 @@ def read_obj_dense_features(dense_obj_feat1, dense_obj_feat2, bbox, sparse_obj_f
             'concat_viewIndex': concat_viewIndex,
             'concat_prob': concat_prob
         }
-    print("Finish loading the prob larger than %0.2f dense object dense feature from %s and %s in %0.4f seconds" % (
-                                                th,dense_obj_feat1, dense_obj_feat2, time.time()-start))
-    print("%d viewpoint get None object prob > % 0.2f"%(none_num, th))
-    return  objs
+
+
+    print("Finish Loading the prob larger than %0.2f dense object dense feature from %s and %s in %0.4f seconds" % (
+                                                th,dense_obj_feat1, dense_obj_feat2,
+                                                                    time.time() - start))
+    print("%d viewpoint get None object prob > %0.2f" %(none_num, th))
+    return objs
 
 def read_obj_sparse_features(sparse_obj_feat, th):
     print("Start loading the object sparse feature")

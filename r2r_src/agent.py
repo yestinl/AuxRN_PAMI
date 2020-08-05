@@ -92,13 +92,14 @@ class Seq2SeqAgent(BaseAgent):
         super(Seq2SeqAgent, self).__init__(env, results_path)
         self.tok = tok
         self.episode_len = episode_len
-        self.feature_size = self.env.feature_size
+        if self.env is not None:
+            self.feature_size = self.env.feature_size
 
         # Models
         enc_hidden_size = args.rnn_dim//2 if args.bidir else args.rnn_dim
         self.encoder = model.EncoderLSTM(tok.vocab_size(), args.wemb, enc_hidden_size, padding_idx,
                                          args.dropout, bidirectional=args.bidir).cuda()
-        self.decoder = model.AttnDecoderLSTM(args.aemb, args.rnn_dim, args.dropout, feature_size=self.feature_size + args.angle_feat_size).cuda()
+        self.decoder = model.AttnDecoderLSTM(args.aemb, args.rnn_dim, args.dropout).cuda()
         self.critic = model.Critic().cuda()
         self.models = (self.encoder, self.decoder, self.critic)
 
@@ -139,21 +140,86 @@ class Seq2SeqAgent(BaseAgent):
 
     def _feature_variable(self, obs):
         ''' Extract precomputed features into variable. '''
-        if args.denseObj and not args.sparseObj:
-            Obj_leng = [ob['obj_d_feature'].shape[0] for ob in obs]
-            if args.catfeat == 'none':
-                denseObj = np.zeros((len(obs), max(Obj_leng), args.feature_size),
-                                    dtype=np.float32)
+        if args.sparseObj and (not args.denseObj):
+            Obj_leng = [ob['obj_s_feature'].shape[0] for ob in obs]
+            if not args.catRN:
+                sparseObj = np.zeros((len(obs), max(Obj_leng), args.glove_emb + args.angle_bbox_size), dtype=np.float32)
+                for i, ob in enumerate(obs):
+                    sparseObj[i, :Obj_leng[i], :args.glove_emb] = ob['obj_s_feature']
+                    sparseObj[i, :Obj_leng[i], -args.angle_bbox_size:] = np.append(ob['bbox_angle_e'], ob['bbox_angle_h'], axis=1)
+                return Variable(torch.from_numpy(sparseObj), requires_grad=False).cuda(), Obj_leng
             else:
-                denseObj = np.zeros((len(obs), max(Obj_leng), args.feature_size+args.angle_feat_size),
+                sparseObj = np.zeros((len(obs), max(Obj_leng), args.glove_emb + args.angle_bbox_size),
+                                     dtype=np.float32)
+                for i, ob in enumerate(obs):
+                    sparseObj[i, :Obj_leng[i], :args.glove_emb] = ob['obj_s_feature']
+                    sparseObj[i, :Obj_leng[i], -args.angle_bbox_size:] = np.append(ob['bbox_angle_e'],
+                                                                                   ob['bbox_angle_h'], axis=1)
+                features = np.empty((len(obs), args.views, self.feature_size + args.angle_feat_size),
                                     dtype=np.float32)
-            for i,ob in enumerate(obs):
-                denseObj[i, :Obj_leng[i], :] = ob['obj_d_feature']
-            features = np.empty((len(obs), args.views, self.feature_size+args.angle_feat_size),
-                                dtype=np.float32)
-            for i,ob in enumerate(obs):
-                features[i, :, :] = ob['feature']
-            return Variable(torch.from_numpy(denseObj), requires_grad=False).cuda(), Obj_leng, Variable(
+                for i, ob in enumerate(obs):
+                    features[i, :, :] = ob['feature']
+                return Variable(torch.from_numpy(sparseObj), requires_grad=False).cuda(), Obj_leng, Variable(torch.from_numpy(features), requires_grad=False).cuda()
+        elif args.denseObj and (not args.sparseObj):
+            Obj_leng = [ob['obj_d_feature'].shape[0] for ob in obs]
+            if not (args.catRN or args.addRN):
+                denseObj = np.zeros((len(obs), max(Obj_leng), args.feature_size+args.angle_feat_size), dtype=np.float32)
+                for i, ob in enumerate(obs):
+                    denseObj[i, :Obj_leng[i], :args.feature_size] = ob['obj_d_feature']
+                    denseObj[i, :Obj_leng[i], -args.angle_feat_size:] = np.tile(np.append(ob['bbox_angle_e'],
+                                                                                            ob['bbox_angle_h'], axis=1), args.angle_feat_size//8)
+                return Variable(torch.from_numpy(denseObj), requires_grad=False).cuda(), Obj_leng
+            else:
+                if args.catfeat == 'none':
+                    denseObj = np.zeros((len(obs), max(Obj_leng), args.feature_size),
+                                        dtype=np.float32)
+                elif args.catfeat == 'bboxAngle':
+                    denseObj = np.zeros((len(obs), max(Obj_leng), args.feature_size+args.angle_feat_size*2),
+                                        dtype=np.float32)
+                else:
+                    denseObj = np.zeros((len(obs), max(Obj_leng), args.feature_size+args.angle_feat_size),
+                                        dtype=np.float32)
+                for i, ob in enumerate(obs):
+                    denseObj[i, :Obj_leng[i], :] = ob['obj_d_feature']
+                    # denseObj[i, :Obj_leng[i], -args.angle_feat_size:-args.angle_feat_size/2] = np.tile(ob['concat_bbox'], (args.angle_feat_size/2)//8)
+                features = np.empty((len(obs), args.views, self.feature_size + args.angle_feat_size),
+                                    dtype=np.float32)
+                for i, ob in enumerate(obs):
+                    features[i, :, :] = ob['feature']
+                return Variable(torch.from_numpy(denseObj), requires_grad=False).cuda(), Obj_leng, Variable(
+                    torch.from_numpy(features), requires_grad=False).cuda()
+        elif args.denseObj and args.sparseObj:
+            Obj_leng = [ob['obj_d_feature'].shape[0] for ob in obs]
+            if not args.catRN:
+                denseObj = np.zeros((len(obs), max(Obj_leng), args.feature_size + args.angle_feat_size),
+                                    dtype=np.float32)
+                for i, ob in enumerate(obs):
+                    denseObj[i, :Obj_leng[i], :args.feature_size] = ob['obj_d_feature']
+                    denseObj[i, :Obj_leng[i], -args.angle_feat_size:] = np.repeat(np.append(ob['bbox_angle_e'],
+                                                                                            ob['bbox_angle_h'], axis=1), args.angle_feat_size//8, axis=1)
+                sparseObj = np.zeros((len(obs), max(Obj_leng), args.glove_emb + args.angle_bbox_size), dtype=np.float32)
+                for i, ob in enumerate(obs):
+                    sparseObj[i, :Obj_leng[i], :args.glove_emb] = ob['obj_s_feature']
+                    sparseObj[i, :Obj_leng[i], -args.angle_bbox_size:] = np.append(ob['bbox_angle_e'],
+                                                                                   ob['bbox_angle_h'], axis=1)
+                return Variable(torch.from_numpy(sparseObj), requires_grad=False).cuda(),Variable(torch.from_numpy(denseObj), requires_grad=False).cuda(),  Obj_leng
+            else:
+                denseObj = np.zeros((len(obs), max(Obj_leng), args.feature_size + args.angle_feat_size),
+                                    dtype=np.float32)
+                for i, ob in enumerate(obs):
+                    denseObj[i, :Obj_leng[i], :args.feature_size] = ob['obj_d_feature']
+                    denseObj[i, :Obj_leng[i], -args.angle_feat_size:] = np.repeat(np.append(ob['bbox_angle_e'],
+                                                                                            ob['bbox_angle_h'], axis=1), args.angle_feat_size//8, axis=1)
+                sparseObj = np.zeros((len(obs), max(Obj_leng), args.glove_emb + args.angle_bbox_size), dtype=np.float32)
+                for i, ob in enumerate(obs):
+                    sparseObj[i, :Obj_leng[i], :args.glove_emb] = ob['obj_s_feature']
+                    sparseObj[i, :Obj_leng[i], -args.angle_bbox_size:] = np.append(ob['bbox_angle_e'],
+                                                                                   ob['bbox_angle_h'], axis=1)
+                features = np.empty((len(obs), args.views, self.feature_size + args.angle_feat_size),
+                                    dtype=np.float32)
+                for i, ob in enumerate(obs):
+                    features[i, :, :] = ob['feature']
+                return Variable(torch.from_numpy(sparseObj), requires_grad=False).cuda(), Variable(torch.from_numpy(denseObj), requires_grad=False).cuda(), Obj_leng, Variable(
                     torch.from_numpy(features), requires_grad=False).cuda()
         else:
             features = np.empty((len(obs), args.views, self.feature_size + args.angle_feat_size), dtype=np.float32)
@@ -161,7 +227,7 @@ class Seq2SeqAgent(BaseAgent):
                 features[i, :, :] = ob['feature']   # Image feat
             return Variable(torch.from_numpy(features), requires_grad=False).cuda()
 
-    def _candidate_variable(self, obs):
+    def _candidate_variable(self, obs, outputObj=False):
         candidate_leng = [len(ob['candidate']) + 1 for ob in obs]       # +1 is for the end
         candidate_feat = np.zeros((len(obs), max(candidate_leng), self.feature_size + args.angle_feat_size), dtype=np.float32)
         # Note: The candidate_feat at len(ob['candidate']) is the feature for the END
@@ -177,12 +243,30 @@ class Seq2SeqAgent(BaseAgent):
             input_a_t[i] = utils.angle_feature(ob['heading'], ob['elevation'])
         input_a_t = torch.from_numpy(input_a_t).cuda()
         candidate_feat, candidate_leng = self._candidate_variable(obs)
-        # if args.denseObj and (not args.sparseObj):
-        #     denseObj, Obj_leng, features = self._feature_variable(obs)
-        #     return input_a_t, denseObj, Obj_leng, features, candidate_feat, candidate_leng
-        # else:
-        f_t = self._feature_variable(obs)      # Image features from obs
-        return input_a_t, f_t, candidate_feat, candidate_leng
+        if args.sparseObj and (not args.denseObj):
+            if not args.catRN:
+                sparseObj, Obj_leng = self._feature_variable(obs)
+                return input_a_t, sparseObj, Obj_leng, candidate_feat, candidate_leng
+            else:
+                sparseObj, Obj_leng, features = self._feature_variable(obs)
+                return input_a_t, sparseObj, Obj_leng, features, candidate_feat, candidate_leng
+        elif args.denseObj and (not args.sparseObj):
+            if not (args.catRN or args.addRN):
+                denseObj, Obj_leng = self._feature_variable(obs)
+                return input_a_t, denseObj, Obj_leng, candidate_feat, candidate_leng
+            else:
+                denseObj, Obj_leng, features = self._feature_variable(obs)
+                return input_a_t, denseObj, Obj_leng, features, candidate_feat, candidate_leng
+        elif args.denseObj and args.sparseObj:
+            if not args.catRN:
+                sparseObj, denseObj, Obj_leng = self._feature_variable(obs)
+                return input_a_t, sparseObj, denseObj, Obj_leng, candidate_feat, candidate_leng
+            else:
+                sparseObj, denseObj, Obj_leng, features = self._feature_variable(obs)
+                return input_a_t, sparseObj, denseObj, Obj_leng, features, candidate_feat, candidate_leng
+        else:
+            f_t = self._feature_variable(obs)  # Image features from obs
+            return input_a_t, f_t, candidate_feat, candidate_leng
 
     def _teacher_action(self, obs, ended):
         """
@@ -318,12 +402,23 @@ class Seq2SeqAgent(BaseAgent):
             denseObj = None
             f_t = None
             Obj_leng = None
-            input_a_t, f_t_tuple, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
-            if args.denseObj and (not args.sparseObj):
-                denseObj, Obj_leng, f_t = f_t_tuple
+            if args.sparseObj and (not args.denseObj):
+                if not args.catRN:
+                    input_a_t, sparseObj, Obj_leng, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
+                else:
+                    input_a_t, sparseObj, Obj_leng, f_t, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
+            elif args.denseObj and (not args.sparseObj):
+                if not (args.catRN or args.addRN):
+                    input_a_t, denseObj, Obj_leng, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
+                else:
+                    input_a_t, denseObj, Obj_leng, f_t, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
+            elif args.denseObj and args.sparseObj:
+                if not args.catRN:
+                    input_a_t, sparseObj, denseObj, Obj_leng, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
+                else:
+                    input_a_t, sparseObj, denseObj, Obj_leng, f_t, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
             else:
-                f_t = f_t_tuple
-
+                input_a_t, f_t, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
             if Obj_leng is not None:
                 ObjFeature_mask = utils.length2mask(Obj_leng)
             if speaker is not None:       # Apply the env drop mask to the feat
@@ -331,9 +426,11 @@ class Seq2SeqAgent(BaseAgent):
                 f_t[..., :-args.angle_feat_size] *= noise
                 if args.denseObj:
                     if args.catfeat == 'none':
-                        denseObj *=noise
+                        denseObj *= noise
+                    elif args.catfeat == 'bboxAngle':
+                        denseObj[...,:-args.angle_feat_size*2] *= noise
                     else:
-                        denseObj[...,:-args.angle_feat_size] *=noise
+                        denseObj[...,:-args.angle_feat_size] *= noise
 
             h_t, c_t, logit, h1 = self.decoder(input_a_t,candidate_feat,
                                                h1, c_t,
@@ -433,11 +530,23 @@ class Seq2SeqAgent(BaseAgent):
             denseObj = None
             f_t = None
             Obj_leng = None
-            input_a_t, f_t_tuple, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
-            if args.denseObj and (not args.sparseObj):
-                denseObj, Obj_leng, f_t = f_t_tuple
+            if args.sparseObj and (not args.denseObj):
+                if not args.catRN:
+                    input_a_t, sparseObj, Obj_leng, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
+                else:
+                    input_a_t, sparseObj, Obj_leng, f_t, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
+            elif args.denseObj and (not args.sparseObj):
+                if not (args.catRN or args.addRN):
+                    input_a_t, denseObj, Obj_leng, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
+                else:
+                    input_a_t, denseObj, Obj_leng, f_t, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
+            elif args.denseObj and args.sparseObj:
+                if not args.catRN:
+                    input_a_t, sparseObj, denseObj, Obj_leng, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
+                else:
+                    input_a_t, sparseObj, denseObj, Obj_leng, f_t, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
             else:
-                f_t = f_t_tuple
+                input_a_t, f_t, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
             if Obj_leng is not None:
                 ObjFeature_mask = utils.length2mask(Obj_leng)
             if speaker is not None:
@@ -445,7 +554,9 @@ class Seq2SeqAgent(BaseAgent):
                 f_t[..., :-args.angle_feat_size] *= noise
                 if args.denseObj:
                     if args.catfeat == 'none':
-                        denseObj * noise
+                        denseObj *= noise
+                    elif args.catfeat == 'bboxAngle':
+                        denseObj[..., :-args.angle_feat_size * 2] *= noise
                     else:
                         denseObj[...,:-args.angle_feat_size] * noise
             last_h_, _, _, _ = self.decoder(input_a_t,candidate_feat,

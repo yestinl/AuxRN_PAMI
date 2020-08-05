@@ -15,4 +15,4 @@ environment:
 
 
 run:
-    cmd: python3.6  r2r_src/train.py --upload --denseObj --objthr 0.99 --name Envdrop_MultiVis2Attn_denseObj_0.99_cat_none
+    cmd: python3.6  r2r_src/train.py --upload --submit --denseObj --catRN --objthr 0.99 --objInputMode sg --name Envdrop_copy_denseObj_0.99_cat_none_sb

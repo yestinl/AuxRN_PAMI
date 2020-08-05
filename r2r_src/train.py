@@ -78,6 +78,13 @@ def train_speaker(train_env, tok, n_iters, log_every=500, val_envs={}):
     listner = Seq2SeqAgent(train_env, "", tok, args.maxAction)
     speaker = Speaker(train_env, listner, tok)
 
+    if args.load is not None:
+        print("LOAD THE Speaker from %s" % args.load)
+        if args.upload:
+            speaker.load(get_sync_dir(args.load))
+        else:
+            speaker.load(os.path.join(args.load))
+
     if args.fast_train:
         log_every = 40
 
@@ -102,6 +109,7 @@ def train_speaker(train_env, tok, n_iters, log_every=500, val_envs={}):
             speaker.env = env
             path2inst, loss, word_accu, sent_accu = speaker.valid()
             path_id = next(iter(path2inst.keys()))
+            print('path_id:', path_id)
             print("Inference: ", tok.decode_sentence(path2inst[path_id]))
             print("GT: ", evaluator.gt[str(path_id)]['instructions'])
             bleu_score, precisions = evaluator.bleu_score(path2inst)
@@ -222,7 +230,8 @@ def train(train_env, tok, n_iters, log_every=100, val_envs={}, aug_env=None):
             iters = None if args.fast_train or env_name != 'train' else 20     # 20 * 64 = 1280
 
             # Get validation distance from goal under test evaluation conditions
-            listner.test(use_dropout=False, feedback='argmax', iters=iters)
+            with torch.no_grad():
+                listner.test(use_dropout=False, feedback='argmax', iters=iters)
             result = listner.get_results()
             score_summary, _ = evaluator.score(result)
             loss_str += "%s " % env_name
