@@ -438,7 +438,7 @@ class Seq2SeqAgent(BaseAgent):
             if args.aux_option:
                 if args.modfea:
                     _mask = torch.from_numpy(mask).cuda().bool()
-                    _mask = ~_mask # different definition
+                    _mask = ~_mask # 1 invalid, 0 valid
                     target_aux = target.clone()
                     target_aux[_mask] = 0
                     target_aux = target_aux.unsqueeze(1).unsqueeze(2)
@@ -451,8 +451,8 @@ class Seq2SeqAgent(BaseAgent):
                     feature_pred = self.feature_predictor(h1)
                     angle_pred = self.angle_predictor(h1)
                     if args.mask_fea:
-                        fea_loss += torch.mean(F.mse_loss(feature_pred, feature_label, reduce=False) * _mask.unsqueeze(1))
-                        ang_loss += torch.mean(F.mse_loss(angle_pred, angle_label, reduce=False) * _mask.unsqueeze(1))
+                        fea_loss += torch.mean(F.mse_loss(feature_pred, feature_label, reduce=False) * (~_mask).float().unsqueeze(1))
+                        ang_loss += torch.mean(F.mse_loss(angle_pred, angle_label, reduce=False) * (~_mask).float().unsqueeze(1))
                     else:
                         fea_loss += F.mse_loss(feature_pred, feature_label)
                         ang_loss += F.mse_loss(angle_pred, angle_label)
