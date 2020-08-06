@@ -213,7 +213,7 @@ class AttnDecoderLSTM(nn.Module):
             self.lstm = nn.LSTMCell(embedding_size+feature_size*args.headNum, hidden_size)
         else:
             self.lstm = nn.LSTMCell(embedding_size + feature_size, hidden_size)
-            self.feat_att_layer = SoftDotAttention(hidden_size, args.feature_size + args.angle_feat_size)
+            self.feat_att_layer = SoftDotAttention(hidden_size, feature_size)
         # self.lstm = nn.LSTMCell(embedding_size+feature_size, hidden_size)
         # self.feat_att_layer = SoftDotAttention(hidden_size, feature_size)
 

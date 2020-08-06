@@ -3,10 +3,10 @@ kind: group
 build:
     image: docker.dm-ai.cn/algorithm-research/matteraux:latest
 hptuning:
-    concurrency: 6
+    concurrency: 12
     matrix:
         headNum:
-            values: [1,2]
+            values: [1,2,3,5]
         multiMode:
             values: [vis,ins,can]
 environment:
@@ -22,4 +22,4 @@ environment:
 
 
 run:
-    cmd: python3.6  r2r_src/train.py --upload --headNum={{headNum}} --multiMode={{multiMode}} --name Envdrop_MultiAttention_{{multiMode}}_{{headNum}}_head
+    cmd: python3.6  r2r_src/train.py --upload --headNum={{headNum}} --multiMode={{multiMode}} --name Envdrop_MultiAttention_{{multiMode}}_{{headNum}}_head --submit

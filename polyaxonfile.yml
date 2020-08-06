@@ -15,4 +15,4 @@ environment:
 
 
 run:
-    cmd: python3.6 r2r_src/train.py --upload --multiMode can --headNum 2 --name can_2_head_submit --submit
+    cmd: python3.6 r2r_src/train.py --upload --multiMode vis --headNum 1 --name vis_1_head_from_orgin
