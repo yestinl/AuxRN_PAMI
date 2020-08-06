@@ -1,5 +1,12 @@
 version: 1
-kind: experiment
+kind: group
+
+hptuning:
+  concurrency: 8
+  matrix:
+    weight:
+      values: [0.25, 0.5, 2, 4]
+
 build:
     image: docker.dm-ai.cn/algorithm-research/matteraux:latest
 environment:
@@ -18,4 +25,4 @@ inputs:
     type: str
 
 run:
-    cmd: python3.6 r2r_src/train.py --upload --aux_option --angWeight 1 --modfea --mask_fea --name {{ name }}
+    cmd: python3.6 r2r_src/train.py --upload --aux_option --angWeight {{ weight }} --modfea --mask_fea  --name {{ name }}_w_{{ weight }}
