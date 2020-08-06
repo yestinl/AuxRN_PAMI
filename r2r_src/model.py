@@ -245,24 +245,45 @@ class AttnDecoderLSTM(nn.Module):
     ''' An unrolled LSTM with attention over instructions for decoding navigation actions. '''
 
     def __init__(self, embedding_size, hidden_size,
-                       dropout_ratio, feature_size=2048+4):
+                       dropout_ratio):
         super(AttnDecoderLSTM, self).__init__()
-        self.obj_feat_size = 0
-        if args.denseObj and (not args.sparseObj):
-            print("Train in denseObj+RN cat %s, %s mode" % (args.catfeat,args.objInputMode))
-            if args.catfeat == 'none':
-                self.obj_angle_num = 0
-            else:
-                self.obj_angle_num= 1
-            self.obj_feat_size = args.feature_size+args.angle_feat_size*self.obj_angle_num
+        if args.sparseObj and (not args.denseObj):
+            print("Train in sparseObj mode")
+            feature_size = args.glove_emb+args.angle_bbox_size  # 308
+            if args.catRN:
+                print("Train in sparseObj+RN mode")
+                feature_size = args.glove_emb+args.angle_bbox_size+args.feature_size+args.angle_feat_size # 2484
+        elif args.denseObj and (not args.sparseObj):
+            print("Train in denseObj mode")
+            feature_size = args.feature_size+args.angle_feat_size   # 2176
+            if args.catRN:
+                print("Train in denseObj cat RN mode")
+
+                print("Train in denseObj cat%s mode"%args.catfeat)
+                if args.catfeat == 'none':
+                    feature_size = args.feature_size * 2 + args.angle_feat_size  # 4352
+                elif args.catfeat == 'bboxAngle':
+                    feature_size = args.feature_size * 2 + args.angle_feat_size * 3  # 4352
+                else:
+                    feature_size = args.feature_size * 2 + args.angle_feat_size * 2
+                # self.att_fc = nn.Linear(feature_size, args.feature_size) # run denseObj_RN_FC_0
+            if args.addRN:
+                print("Train in denseObj add RN mode")
+                feature_size = args.feature_size + args.angle_feat_size
+
+
+        elif args.denseObj and args.sparseObj:
+            print("Train in sparseObj + denseObj mode")
+            feature_size = args.feature_size+args.angle_feat_size+args.glove_emb+args.angle_bbox_size # 2484
+            if args.catRN:
+                print("Train in sparseObj+denseObj+RN mode")
+                feature_size = args.feature_size*2+args.angle_feat_size*2+args.glove_emb+args.angle_bbox_size # 4660
         else:
             print("Train in RN mode")
-        self.view_feat_size = args.feature_size+args.angle_feat_size
-        self.lstm_feature_size = self.view_feat_size + self.obj_feat_size
-            # feature_size = args.feature_size+args.angle_feat_size
-        print('LSTM feature size:%d + %d '%(self.view_feat_size, self.obj_feat_size))
+            feature_size = args.feature_size+args.angle_feat_size # 2176
+        print('feature_size: %d'%feature_size)
         self.embedding_size = embedding_size
-        # self.lstm_feature_size = feature_size
+        self.feature_size = feature_size
         self.hidden_size = hidden_size
         self.embedding = nn.Sequential(
             nn.Linear(args.angle_feat_size, self.embedding_size),
@@ -271,31 +292,45 @@ class AttnDecoderLSTM(nn.Module):
         self.drop = nn.Dropout(p=dropout_ratio)
         self.drop_env = nn.Dropout(p=args.featdropout)
 
-        if args.multiMode == "vis" and args.headNum > 1:
-            self.lstm_feature_size = (self.view_feat_size)*args.headNum+self.obj_feat_size
-            print("LSTM feature size: %d x %d + %d"%(self.view_feat_size, args.headNum, self.obj_feat_size))
+        if args.multiMode == "vis":
             self.feat_att_layer = MultiHeadSelfAttention(args.headNum, hidden_size, args.feature_size + args.angle_feat_size)
-            self.lstm = nn.LSTMCell(embedding_size+self.lstm_feature_size, hidden_size)
+            self.lstm = nn.LSTMCell(embedding_size+feature_size*args.headNum, hidden_size)
         else:
-            self.lstm = nn.LSTMCell(embedding_size + self.lstm_feature_size, hidden_size)
+            self.lstm = nn.LSTMCell(embedding_size + feature_size, hidden_size)
             self.feat_att_layer = SoftDotAttention(hidden_size, args.feature_size + args.angle_feat_size)
-        # self.lstm = nn.LSTMCell(embedding_size+feature_size, hidden_size)
-        # self.feat_att_layer = SoftDotAttention(hidden_size, feature_size)
         if args.denseObj:
-            if args.objInputMode == 'sg' or 'tanh':
-                self.dense_input_layer = Gate(hidden_size, self.obj_feat_size)
+            print("Train in %s mode."%args.objInputMode)
+            if (args.objInputMode == 'sg') or (args.objInputMode == 'tanh'):
+                if args.catfeat == 'none':
+                    self.dense_input_layer = Gate(hidden_size, args.feature_size)
+                elif args.catfeat == 'bboxAngle':
+                    self.dense_input_layer = Gate(hidden_size, args.feature_size + args.angle_feat_size*2)
+                else:
+                    self.dense_input_layer = Gate(hidden_size, args.feature_size + args.angle_feat_size)
             elif args.objInputMode == 'sm':
-                self.dense_input_layer = SoftDotAttention(hidden_size, self.obj_feat_size)
-        if args.multiMode == 'can' and args.headNum > 1:
+                if args.catfeat == 'none':
+                    self.dense_input_layer = SoftDotAttention(hidden_size, args.feature_size)
+                elif args.catfeat == 'bboxAngle':
+                    self.dense_input_layer = SoftDotAttention(hidden_size, args.feature_size + args.angle_feat_size * 2)
+                else:
+                    self.dense_input_layer = SoftDotAttention(hidden_size, args.feature_size + args.angle_feat_size)
+            # self.dense_att_layer = SoftDotAttention(hidden_size, args.feature_size)
+        if args.sparseObj:
+            print("Train in %s mode"%args.objInputMode)
+            if (args.objInputMode == 'sg') or (args.objInputMode == 'tanh'):
+                self.sparse_input_layer = Gate(hidden_size, args.glove_emb + args.angle_bbox_size)
+            elif args.objInputMode == 'sm':
+                self.sparse_input_layer = SoftDotAttention(hidden_size, args.glove_emb+args.angle_bbox_size)
+
+        if args.multiMode == 'ins':
+            self.attention_layer = MultiHeadSelfAttention(args.headNum, hidden_size, hidden_size)
+        else:
+            self.attention_layer = SoftDotAttention(hidden_size, hidden_size)
+        if args.multiMode == 'can':
             self.candidate_att_layer = MultiHeadSelfAttention(args.headNum, hidden_size, args.feature_size+args.angle_feat_size)
         else:
             self.candidate_att_layer = SoftDotAttention(hidden_size, args.feature_size+args.angle_feat_size)
-        # self.candidate_att_layer = SoftDotAttention(hidden_size, feature_size)
 
-        if args.multiMode == 'ins' and args.headNum > 1:
-            self.attention_layer = MultiHeadSelfAttention(args.headNum,hidden_size, hidden_size)
-        else:
-            self.attention_layer = SoftDotAttention(hidden_size, hidden_size)
 
     def forward(self, action, cand_feat,
                 prev_h1, c_0,
@@ -319,24 +354,50 @@ class AttnDecoderLSTM(nn.Module):
         action_embeds = self.drop(action_embeds)
 
         if not already_dropfeat:
-            # Dropout the raw feature as a common regularization
-            feature[..., :-args.angle_feat_size] = self.drop_env(feature[..., :-args.angle_feat_size])   # Do not drop the last args.angle_feat_size (position feat)
+            if sparseObj is not None:
+                sparseObj[..., :-args.angle_bbox_size] = self.drop_env(sparseObj[..., :-args.angle_bbox_size])
             if denseObj is not None:
                 if args.catfeat == 'none':
                     denseObj = self.drop_env(denseObj)
+                elif args.catfeat == 'bboxAngle':
+                    denseObj[..., -args.angle_feat_size*2] = self.drop_env(denseObj[..., -args.angle_feat_size*2])
                 else:
-                    denseObj[..., -args.angle_feat_size] = self.drop_env(denseObj[...,-args.angle_feat_size])
+                    denseObj[..., -args.angle_feat_size] = self.drop_env(denseObj[..., -args.angle_feat_size])
+            if feature is not None:
+                # Dropout the raw feature as a common regularization
+                feature[..., :-args.angle_feat_size] = self.drop_env(
+                    feature[..., :-args.angle_feat_size])  # Do not drop the last args.angle_feat_size (position feat)
 
         prev_h1_drop = self.drop(prev_h1)
 
+        if sparseObj is not None:
+            sparse_attn_feat, _ = self.sparse_input_layer(prev_h1_drop, sparseObj, mask=ObjFeature_mask,
+                                                        output_tilde=False)
         if denseObj is not None:
-            obj_input_feat, _ = self.dense_input_layer(prev_h1_drop, denseObj, mask=ObjFeature_mask,
-                                                         output_tilde=False)
+            dense_input_feat, _ = self.dense_input_layer(prev_h1_drop, denseObj, mask=ObjFeature_mask,
+                                                          output_tilde=False)  # input:(64,512)(64,k,2176) output:(64,2176)
 
-        RN_attn_feat, _ = self.feat_att_layer(prev_h1_drop, feature, output_tilde=False)
+        if feature is not None:
+            # Dropout the raw feature as a common regularization
+            RN_attn_feat, _ = self.feat_att_layer(prev_h1_drop, feature,
+                                                  output_tilde=False)  # input: (64,512), (64,36,2176) output:(64,2176)
 
-        if args.sparseObj or args.denseObj:
-            attn_feat = torch.cat([RN_attn_feat,obj_input_feat],1)
+        if args.sparseObj and(not args.denseObj):
+            attn_feat = sparse_attn_feat
+            if args.catRN:
+                attn_feat = torch.cat([RN_attn_feat,sparse_attn_feat],1)
+        elif args.denseObj and (not args.sparseObj):
+            attn_feat = dense_input_feat
+            if args.catRN:
+                attn_feat = torch.cat([RN_attn_feat, dense_input_feat], 1) #(64,4352)
+                # attn_feat = self.att_fc(attn_feat) # run denseObj_RN_FC_0
+            if args.addRN:
+                attn_feat = dense_input_feat+RN_attn_feat[:,:args.feature_size]
+                attn_feat = torch.cat([attn_feat, RN_attn_feat[:,args.feature_size:]], 1)
+        elif args.denseObj and args.sparseObj:
+            attn_feat = torch.cat([dense_input_feat,sparse_attn_feat], 1)
+            if args.catRN:
+                attn_feat = torch.cat([RN_attn_feat, dense_input_feat, sparse_attn_feat],1)
         else:
             attn_feat = RN_attn_feat
 

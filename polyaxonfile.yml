@@ -11,8 +11,8 @@ environment:
             requests: 1
             limits: 1
     outputs:
-        experiments: [23676]
+        experiments: [24899]
 
 
 run:
-    cmd: python3.6  r2r_src/train.py --upload --denseObj --objthr 0.99 --name Envdrop_MultiVis2Attn_denseObj_0.99_cat_none
+    cmd: python3.6  r2r_src/train.py --train validlistener --upload --denseObj --objthr 0.99 --name Envdrop_denseObj_0.99_cat_none --submit --load snap/Envdrop_MultiVis2Attn_denseObj_0.99_cat_none/state_dict/best_val_unseen

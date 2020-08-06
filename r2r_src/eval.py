@@ -3,6 +3,7 @@
 import json
 import os
 import sys
+from param import args
 from collections import defaultdict
 import networkx as nx
 import numpy as np
