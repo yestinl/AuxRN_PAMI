@@ -3,11 +3,7 @@
 import os
 import sys
 import re
-from param import args
-if args.upload:
-    sys.path.insert(0, '/R2R-Aux/build')
-else:
-    sys.path.insert(0, 'build')
+sys.path.append('build')
 import MatterSim
 import string
 import json
@@ -17,9 +13,13 @@ from collections import Counter, defaultdict
 import numpy as np
 import networkx as nx
 from param import args
+import random
+
 import subprocess
 
 from polyaxon_client.tracking import get_data_paths
+
+
 
 # padding, unknown word, end of sentence
 base_vocab = ['<PAD>', '<UNK>', '<EOS>']
@@ -288,6 +288,13 @@ def read_obj_dense_features(dense_obj_feat1, dense_obj_feat2, bbox, sparse_obj_f
             for i, feat in enumerate(obj_d_feat[long_id]['concat_feature']):
                 if obj_d_feat[long_id]['concat_prob'][i] < th:
                     continue
+                # txt = obj_d_feat[long_id]['concat_text'][i].split()
+                # if len(txt) == 1:
+                #     if txt[0] == 'wall' or txt[0] == 'ceiling':
+                #         continue
+                # elif txt[1] == 'wall' or txt[1] == 'ceiling':
+                #     # print(txt[1])
+                #     continue
                 sum_feature += feat
                 assert bbox_feat[long_id]['concat_viewIndex']==obj_d_feat[long_id]['concat_viewIndex']
                 sum_bbox = bbox_feat[long_id]['concat_bbox'][i]
@@ -350,6 +357,8 @@ def read_obj_dense_features(dense_obj_feat1, dense_obj_feat2, bbox, sparse_obj_f
         concat_prob = [None] * num_obj
         for n_obj, obj in enumerate(viewpoint_object):
             concat_bbox[n_obj] = obj['bbox']
+            # concat_angles_h[n_obj] = obj['angles_h']
+            # concat_angles_e[n_obj] = obj['angles_e']
             concat_angles[n_obj] = obj['angles']
             concat_dense_feature[n_obj] = obj['features']
             concat_text[n_obj] = obj['text']
@@ -357,6 +366,8 @@ def read_obj_dense_features(dense_obj_feat1, dense_obj_feat2, bbox, sparse_obj_f
             concat_prob[n_obj] = obj['prob']
         objs[long_id] = {
             'concat_bbox': concat_bbox,
+            # 'concat_angles_h': concat_angles_h,
+            # 'concat_angles_e': concat_angles_e,
             'concat_angles': concat_angles,
             'concat_feature': concat_dense_feature,
             'concat_text': concat_text,
@@ -689,6 +700,13 @@ def length2mask(length, size=None):
                 > (torch.LongTensor(length) - 1).unsqueeze(1)).cuda()
     return mask
 
+def traj_length2mask(length, max_len, size=None):
+    batch_size = max_len
+    size = int(max(length)) if size is None else size
+    mask = (torch.arange(size, dtype=torch.int64).unsqueeze(0).repeat(batch_size, 1)
+            > (torch.LongTensor(length) - 1).unsqueeze(1)).cuda()
+    return mask
+
 def average_length(path2inst):
     length = []
 
@@ -782,4 +800,37 @@ def get_sync_dir(file):
 
     return data_dir
 
+def gt_words(obs, multi=False):
+    """
+    See "utils.Tokenizer.encode_sentence(...)" for "instr_encoding" details
+    """
+    if multi:
+        seq_tensor = []
+        for i in range(args.multiNum):
+            seq_tensor_i = np.array([ob['instr_encoding'][i] for ob in obs])
+            seq_tensor.append(torch.from_numpy(seq_tensor_i).cuda())
+        return seq_tensor
+    else:
+        seq_tensor = np.array([ob['instr_encoding'] for ob in obs])
+        return torch.from_numpy(seq_tensor).cuda()
+
+def progress_generator(mask):
+    mask = ~mask # [True, True, False]
+    counter = mask.clone()
+    counter = torch.sum(counter, dim=1).float()
+    unit = 1 / counter
+    progress = torch.ones_like(mask).cuda()
+    progress = torch.cumsum(progress, dim=1).float()
+    progress = progress * unit.unsqueeze(1).expand(mask.shape)
+    progress = progress * mask.float()
+    return progress
+
+
+def setup_seed(seed):
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    np.random.seed(seed)
+    random.seed(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 

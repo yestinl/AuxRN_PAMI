@@ -99,18 +99,68 @@ class Seq2SeqAgent(BaseAgent):
         enc_hidden_size = args.rnn_dim//2 if args.bidir else args.rnn_dim
         self.encoder = model.EncoderLSTM(tok.vocab_size(), args.wemb, enc_hidden_size, padding_idx,
                                          args.dropout, bidirectional=args.bidir).cuda()
-        self.decoder = model.AttnDecoderLSTM(args.aemb, args.rnn_dim, args.dropout).cuda()
+
+        if args.longCat:
+            self.decoder = model.AttnDecoderLSTM_LongCat(args.aemb, args.rnn_dim, args.dropout).cuda()
+        else:
+            self.decoder = model.AttnDecoderLSTM(args.aemb, args.rnn_dim, args.dropout).cuda()
         self.critic = model.Critic().cuda()
         self.models = (self.encoder, self.decoder, self.critic)
+
+
+        if args.modspe:
+            self.speaker_decoder = model.SpeakerDecoder_SameLSTM(self.tok.vocab_size(), args.wemb,
+                                                             self.tok.word_to_index['<PAD>'], args.rnn_dim,
+                                                             args.dropout).cuda()
+        else:
+            self.speaker_decoder = model.SpeakerDecoder(self.tok.vocab_size(), args.wemb, self.tok.word_to_index['<PAD>'],
+                                                        args.rnn_dim, args.dropout).cuda()
+        if args.upload:
+            # speaker_model = get_sync_dir('lyx/snap/speaker/state_dict/best_val_unseen_bleu')
+            speaker_model = get_sync_dir('lyx/snap/obj_speaker/state_dict/best_val_unseen_bleu')
+        else:
+            speaker_model = os.path.join(args.R2R_Aux_path, 'snap/speaker/state_dict/best_val_unseen_bleu')
+        print('Use speaker model in %s' % (speaker_model))
+        states = torch.load(speaker_model)
+        self.speaker_decoder.load_state_dict(states["decoder"]["state_dict"])
+        self.progress_indicator = model.ProgressIndicator().cuda()
+        self.matching_network = model.MatchingNetwork().cuda()
+        if args.modmat:
+            self.matching_attention = model.SoftDotAttention(args.rnn_dim, args.rnn_dim).cuda()
+        self.feature_predictor = model.FeaturePredictor().cuda()
+        self.angle_predictor = model.AnglePredictor().cuda()
+        self.aux_models = (self.speaker_decoder, self.progress_indicator, self.matching_network)
+        # self.aux_models = (self.speaker_decoder, self.progress_indicator, self.matching_network, self.angle_predictor,
+        #                    self.feature_predictor)
 
         # Optimizers
         self.encoder_optimizer = args.optimizer(self.encoder.parameters(), lr=args.lr)
         self.decoder_optimizer = args.optimizer(self.decoder.parameters(), lr=args.lr)
         self.critic_optimizer = args.optimizer(self.critic.parameters(), lr=args.lr)
         self.optimizers = (self.encoder_optimizer, self.decoder_optimizer, self.critic_optimizer)
+        self.aux_optimizer = args.optimizer(
+            list(self.speaker_decoder.parameters())
+            + list(self.progress_indicator.parameters())
+            + list(self.matching_network.parameters())
+            + list(self.feature_predictor.parameters())
+            + list(self.angle_predictor.parameters()), lr=args.lr)
+
+        self.all_tuple = [
+            ("encoder", self.encoder, self.encoder_optimizer),
+            ("decoder", self.decoder, self.decoder_optimizer),
+            ("critic", self.critic, self.critic_optimizer),
+            ("speaker_decoder", self.speaker_decoder, self.aux_optimizer),
+            ("progress_indicator", self.progress_indicator, self.aux_optimizer),
+            ("matching_network", self.matching_network, self.aux_optimizer),
+            ("feature_predictor", self.feature_predictor, self.aux_optimizer),
+            ("angle_predictor", self.feature_predictor, self.aux_optimizer)
+        ]
 
         # Evaluations
         self.losses = []
+        self.softmax_loss = torch.nn.CrossEntropyLoss(ignore_index=self.tok.word_to_index['<PAD>'])
+        self.bce_loss = nn.BCELoss().cuda()
+        self.mse_loss = nn.MSELoss().cuda()
         self.criterion = nn.CrossEntropyLoss(ignore_index=args.ignoreid, size_average=False)
 
         # Logs
@@ -118,25 +168,54 @@ class Seq2SeqAgent(BaseAgent):
         self.logs = defaultdict(list)
 
 
-    def _sort_batch(self, obs):
+    def _sort_batch(self, obs, multi=False):
         ''' Extract instructions from a list of observations and sort by descending
             sequence length (to enable PyTorch packing). '''
 
-        seq_tensor = np.array([ob['instr_encoding'] for ob in obs])
-        seq_lengths = np.argmax(seq_tensor == padding_idx, axis=1)
-        seq_lengths[seq_lengths == 0] = seq_tensor.shape[1]     # Full length
+        if multi:
+            seq = []
+            seq_mask = []
+            seq_len = []
+            perm_idx_L = []
+            reverse_idx_L = []
+            for i in range(args.multiNum):
+                seq_tensor = np.array([ob['instr_encoding'][i] for ob in obs])
+                seq_lengths = np.argmax(seq_tensor == padding_idx, axis=1)
+                seq_lengths[seq_lengths == 0] = seq_tensor.shape[1]  # Full length
 
-        seq_tensor = torch.from_numpy(seq_tensor)
-        seq_lengths = torch.from_numpy(seq_lengths)
+                seq_tensor = torch.from_numpy(seq_tensor)
+                seq_lengths = torch.from_numpy(seq_lengths)
 
-        # Sort sequences by lengths
-        seq_lengths, perm_idx = seq_lengths.sort(0, True)       # True -> descending
-        sorted_tensor = seq_tensor[perm_idx]
-        mask = (sorted_tensor == padding_idx)[:,:seq_lengths[0]]    # seq_lengths[0] is the Maximum length
 
-        return Variable(sorted_tensor, requires_grad=False).long().cuda(), \
-               mask.byte().cuda(),  \
-               list(seq_lengths), list(perm_idx)
+                # Sort sequences by lengths
+                seq_lengths, perm_idx = seq_lengths.sort(0, True)
+                mask = (seq_tensor == padding_idx)[:, :seq_lengths[0]]# True -> descending
+                reverse_idx = torch.zeros(perm_idx.shape[0])
+                for i,x in enumerate(perm_idx):
+                    reverse_idx[x] = i
+                perm_idx_L.append(list(perm_idx))
+                reverse_idx_L.append(list(reverse_idx.int()))
+                seq.append(Variable(seq_tensor, requires_grad=False).long().cuda())
+                seq_mask.append(mask.byte().cuda())
+                seq_len.append(list(seq_lengths))
+            return seq, seq_mask, seq_len, perm_idx_L, reverse_idx_L
+
+        else:
+            seq_tensor = np.array([ob['instr_encoding'] for ob in obs])
+            seq_lengths = np.argmax(seq_tensor == padding_idx, axis=1)
+            seq_lengths[seq_lengths == 0] = seq_tensor.shape[1]     # Full length
+
+            seq_tensor = torch.from_numpy(seq_tensor)
+            seq_lengths = torch.from_numpy(seq_lengths)
+
+            # Sort sequences by lengths
+            seq_lengths, perm_idx = seq_lengths.sort(0, True)       # True -> descending
+            sorted_tensor = seq_tensor[perm_idx]
+            mask = (sorted_tensor == padding_idx)[:,:seq_lengths[0]]    # seq_lengths[0] is the Maximum length
+
+            return Variable(sorted_tensor, requires_grad=False).long().cuda(), \
+                   mask.byte().cuda(),  \
+                   list(seq_lengths), list(perm_idx)
 
     def _feature_variable(self, obs):
         ''' Extract precomputed features into variable. '''
@@ -289,7 +368,7 @@ class Seq2SeqAgent(BaseAgent):
                     a[i] = len(ob['candidate'])
         return torch.from_numpy(a).cuda()
 
-    def make_equiv_action(self, a_t, perm_obs, perm_idx=None, traj=None):
+    def make_equiv_action(self, a_t, perm_obs, perm_idx=None, traj=None, multi=False):
         """
         Interface between Panoramic view and Egocentric view
         It will convert the action panoramic view action a_t to equivalent egocentric view actions for the simulator
@@ -301,7 +380,12 @@ class Seq2SeqAgent(BaseAgent):
                 self.env.env.sims[idx].makeAction(*self.env_actions[name])
             state = self.env.env.sims[idx].getState()
             if traj is not None:
-                traj[i]['path'].append((state.location.viewpointId, state.heading, state.elevation))
+                if args.analizePath:
+                    traj[i]['path'].append((state.location.viewpointId, state.heading, state.elevation, state.viewIndex))
+                else:
+                    traj[i]['path'].append((state.location.viewpointId, state.heading, state.elevation))
+        if multi:
+            perm_idx = None
         if perm_idx is None:
             perm_idx = range(len(perm_obs))
         for i, idx in enumerate(perm_idx):
@@ -324,7 +408,7 @@ class Seq2SeqAgent(BaseAgent):
                        self.env.env.sims[idx].getState().navigableLocations[select_candidate['idx']].viewpointId
                 take_action(i, idx, select_candidate['idx'])
 
-    def rollout(self, train_ml=None, train_rl=True, reset=True, speaker=None):
+    def rollout(self, train_ml=None, train_rl=True, reset=True, speaker=None, test=False, multi = False):
         """
         :param train_ml:    The weight to train with maximum likelihood
         :param train_rl:    whether use RL in training
@@ -364,11 +448,25 @@ class Seq2SeqAgent(BaseAgent):
             obs = np.array(self.env.reset(batch))
 
         # Reorder the language input for the encoder (do not ruin the original code)
-        seq, seq_mask, seq_lengths, perm_idx = self._sort_batch(obs)
-        perm_obs = obs[perm_idx]
-
-        ctx, h_t, c_t = self.encoder(seq, seq_lengths)
-        ctx_mask = seq_mask
+        if multi:
+            seq, seq_mask, seq_lengths, perm_idx, reverse_idx = self._sort_batch(obs, multi=True)
+            ctx = []
+            h_t = torch.zeros((batch_size,args.rnn_dim)).cuda()
+            c_t = torch.zeros((batch_size,args.rnn_dim)).cuda()
+            for i in range(args.multiNum):
+                ctx_i, h_t_i, c_t_i = self.encoder(seq[i][perm_idx[i]], seq_lengths[i])
+                ctx.append(ctx_i[reverse_idx[i]])
+                h_t += h_t_i[reverse_idx[i]]
+                c_t += c_t_i[reverse_idx[i]]
+            h_t = h_t/args.multiNum
+            c_t = c_t/args.multiNum
+            ctx_mask = seq_mask
+            perm_obs = obs
+        else:
+            seq, seq_mask, seq_lengths, perm_idx = self._sort_batch(obs)
+            perm_obs = obs[perm_idx]
+            ctx, h_t, c_t = self.encoder(seq, seq_lengths)
+            ctx_mask = seq_mask
 
         # Init the reward shaping
         last_dist = np.zeros(batch_size, np.float32)
@@ -376,10 +474,22 @@ class Seq2SeqAgent(BaseAgent):
             last_dist[i] = ob['distance']
 
         # Record starting point
-        traj = [{
-            'instr_id': ob['instr_id'],
-            'path': [(ob['viewpoint'], ob['heading'], ob['elevation'])]
-        } for ob in perm_obs]
+        if args.analizePath:
+            traj = [{
+                'instr_id': ob['instr_id'],
+                'path': [(ob['viewpoint'], ob['heading'], ob['elevation'], ob['viewIndex'])]
+            } for ob in perm_obs]
+        else:
+            if multi:
+                traj = [{
+                    'path_id': ob['path_id'],
+                    'path': [(ob['viewpoint'], ob['heading'], ob['elevation'])]
+                } for ob in perm_obs]
+            else:
+                traj = [{
+                    'instr_id': ob['instr_id'],
+                    'path': [(ob['viewpoint'], ob['heading'], ob['elevation'])]
+                } for ob in perm_obs]
 
         # For test result submission
         visited = [set() for _ in perm_obs]
@@ -395,7 +505,16 @@ class Seq2SeqAgent(BaseAgent):
         entropys = []
         ml_loss = 0.
 
+        v_ctx = []  # ctx before language att
+        vl_ctx = []  # ctx after language att
+        h_0 = h_t
+        fea_loss = 0
+        ang_loss = 0
         h1 = h_t
+        h1_v = h_t
+        h1_o = h_t
+        c_t_v = c_t
+        c_t_o = c_t
         for t in range(self.episode_len):
             ObjFeature_mask = None
             sparseObj = None
@@ -421,6 +540,7 @@ class Seq2SeqAgent(BaseAgent):
                 input_a_t, f_t, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
             if Obj_leng is not None:
                 ObjFeature_mask = utils.length2mask(Obj_leng)
+            # input_a_t, f_t, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
             if speaker is not None:       # Apply the env drop mask to the feat
                 candidate_feat[..., :-args.angle_feat_size] *= noise
                 f_t[..., :-args.angle_feat_size] *= noise
@@ -432,19 +552,31 @@ class Seq2SeqAgent(BaseAgent):
                     else:
                         denseObj[...,:-args.angle_feat_size] *= noise
 
-            h_t, c_t, logit, h1 = self.decoder(input_a_t,candidate_feat,
-                                               h1, c_t,
-                                               ctx, ctx_mask,feature=f_t,
-                                               sparseObj=sparseObj,denseObj=denseObj,
-                                               ObjFeature_mask=ObjFeature_mask,
-                                               already_dropfeat=(speaker is not None))
+            if args.longCat:
+                h_t_v,h_t_o, c_t_v, c_t_o, logit, h1_v, h1_o = self.decoder(
+                    input_a_t, candidate_feat, h1_v, h1_o, c_t_v, c_t_o,
+                    ctx, ctx_mask,feature=f_t,
+                    sparseObj=sparseObj,denseObj=denseObj,
+                    ObjFeature_mask=ObjFeature_mask,already_dropfeat=(speaker is not None)
+                )
+                v_ctx.append(h_t_v)
+                hidden_states.append(h_t_v)
+            else:
+                h_t, c_t, logit, h1 = self.decoder(input_a_t,candidate_feat,
+                                                   h1, c_t,
+                                                   ctx, ctx_mask,feature=f_t,
+                                                   sparseObj=sparseObj,denseObj=denseObj,
+                                                   ObjFeature_mask=ObjFeature_mask,already_dropfeat=(speaker is not None),
+                                                   multi=multi)
+                v_ctx.append(h_t)
+                hidden_states.append(h_t)
+            vl_ctx.append(h1)
 
-            hidden_states.append(h_t)
 
             # Mask outputs where agent can't move forward
             # Here the logit is [b, max_candidate]
             candidate_mask = utils.length2mask(candidate_leng)
-            if args.submit:     # Avoding cyclic path
+            if args.submit or test==True:     # Avoding cyclic path
                 for ob_id, ob in enumerate(perm_obs):
                     visited[ob_id].add(ob['viewpoint'])
                     for c_id, c in enumerate(ob['candidate']):
@@ -455,6 +587,21 @@ class Seq2SeqAgent(BaseAgent):
             # Supervised training
             target = self._teacher_action(perm_obs, ended)
             ml_loss += self.criterion(logit, target)
+
+            mask = target == -100
+            target_aux = target.clone()
+            target_aux[mask] = 0
+            target_aux = target_aux.unsqueeze(1).unsqueeze(2)
+            target_aux = target_aux.expand(-1,1,candidate_feat.size(2))
+            selected_feat = torch.gather(candidate_feat, 1, target_aux)
+            selected_feat = selected_feat.squeeze(1)
+            selected_feat[mask] = 0
+            feature_label = selected_feat[:, :-args.angle_feat_size]
+            angle_label = selected_feat[:, -4:]
+            feature_pred = self.feature_predictor(h1)
+            angle_pred = self.angle_predictor(h1)
+            fea_loss += self.mse_loss(feature_pred, feature_label)
+            ang_loss += self.mse_loss(angle_pred, angle_label)
 
             # Determine next model inputs
             if self.feedback == 'teacher':
@@ -483,9 +630,15 @@ class Seq2SeqAgent(BaseAgent):
                     cpu_a_t[i] = -1             # Change the <end> and ignore action to -1
 
             # Make action and get the new state
-            self.make_equiv_action(cpu_a_t, perm_obs, perm_idx, traj)
+            if multi:
+                self.make_equiv_action(cpu_a_t, perm_obs, perm_idx, traj, multi=True)
+            else:
+                self.make_equiv_action(cpu_a_t, perm_obs, perm_idx, traj)
             obs = np.array(self.env._get_obs())
-            perm_obs = obs[perm_idx]                    # Perm the obs for the resu
+            if multi:
+                perm_obs = obs
+            else:
+                perm_obs = obs[perm_idx]                    # Perm the obs for the resu
 
             # Calculate the mask and reward
             dist = np.zeros(batch_size, np.float32)
@@ -549,7 +702,8 @@ class Seq2SeqAgent(BaseAgent):
                 input_a_t, f_t, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
             if Obj_leng is not None:
                 ObjFeature_mask = utils.length2mask(Obj_leng)
-            if speaker is not None:
+
+            if speaker is not None:  # Apply the env drop mask to the feat
                 candidate_feat[..., :-args.angle_feat_size] *= noise
                 f_t[..., :-args.angle_feat_size] *= noise
                 if args.denseObj:
@@ -558,13 +712,21 @@ class Seq2SeqAgent(BaseAgent):
                     elif args.catfeat == 'bboxAngle':
                         denseObj[..., :-args.angle_feat_size * 2] *= noise
                     else:
-                        denseObj[...,:-args.angle_feat_size] * noise
-            last_h_, _, _, _ = self.decoder(input_a_t,candidate_feat,
+                        denseObj[...,:-args.angle_feat_size] *= noise
+
+            if args.longCat:
+                last_h_, _, _, _, _, _, _ = self.decoder(
+                    input_a_t, candidate_feat, h1_v, h1_o, c_t_v, c_t_o,
+                    ctx, ctx_mask,feature=f_t,
+                    sparseObj=sparseObj,denseObj=denseObj,
+                    ObjFeature_mask=ObjFeature_mask,already_dropfeat=(speaker is not None)
+                )
+            else:
+                last_h_, _, _, _ = self.decoder(input_a_t,candidate_feat,
                                                h1, c_t,
                                                ctx, ctx_mask,feature=f_t,
                                                sparseObj=sparseObj,denseObj=denseObj,
-                                               ObjFeature_mask=ObjFeature_mask,
-                                               already_dropfeat=(speaker is not None))
+                                               ObjFeature_mask=ObjFeature_mask,already_dropfeat=(speaker is not None),multi=multi)
             rl_loss = 0.
 
             # NOW, A2C!!!
@@ -603,10 +765,121 @@ class Seq2SeqAgent(BaseAgent):
             else:
                 assert args.normalize_loss == 'none'
 
+            self.logs['rl_loss'].append(rl_loss.detach())
             self.loss += rl_loss
 
         if train_ml is not None:
-            self.loss += ml_loss * train_ml / batch_size
+            ml_loss = ml_loss * train_ml / batch_size
+            self.logs['ml_loss'].append(ml_loss.detach())
+            self.loss += ml_loss
+
+        # auxiliary tasks
+        h_t = h_t.unsqueeze(0)
+        c_t = c_t.unsqueeze(0)
+        if multi:
+            insts = utils.gt_words(perm_obs,multi=True)
+        else:
+            insts = utils.gt_words(perm_obs)
+
+        if args.modspe:
+            l = ctx.size(1)
+            insts = insts[:, :l]
+        v_ctx = torch.stack(v_ctx, dim=1)
+        vl_ctx = torch.stack(vl_ctx, dim=1)
+        decode_mask = [torch.tensor(mask) for mask in masks]
+        decode_mask = (1 - torch.stack(decode_mask, dim=1)).bool().cuda()  # different definition about mask
+        # aux #1: speaker recover loss
+        eps = 1e-6
+        if abs(args.speWeight - 0) > eps:
+            if args.modspe:
+                logits = self.speaker_decoder(insts, v_ctx, decode_mask, ctx.detach())
+                logits = logits.permute(0, 2, 1).contiguous()
+            else:
+                if multi:
+                    logits = []
+                    for i in range(args.multiNum):
+                        logits_i , _, _ = self.speaker_decoder(insts[i], v_ctx, decode_mask, h_t, c_t)
+                        logits.append(logits_i.permute(0,2,1).contiguous())
+                else:
+                    logits, _, _ = self.speaker_decoder(insts, v_ctx, decode_mask, h_t, c_t)
+                    # Because the softmax_loss only allow dim-1 to be logit,
+                    # So permute the output (batch_size, length, logit) --> (batch_size, logit, length)
+                    logits = logits.permute(0, 2, 1).contiguous()
+            if multi:
+                spe_loss = 0
+                for i in range(args.multiNum):
+                    spe_loss += self.softmax_loss(
+                        input=logits[i][:,:,:-1],
+                        target=insts[i][:,1:]
+                    )
+                spe_loss /= args.multiNum
+            else:
+                spe_loss = self.softmax_loss(
+                    input=logits[:, :, :-1],  # -1 for aligning
+                    target=insts[:, 1:]  # "1:" to ignore the word <BOS>
+                )
+            spe_loss = spe_loss * args.speWeight
+            self.loss += spe_loss
+            self.logs['spe_loss'].append(spe_loss.detach())
+        else:
+            self.logs['spe_loss'].append(0)
+
+        # aux #2: progress indicator
+        if abs(args.proWeight - 0) > eps:
+            prob = self.progress_indicator(vl_ctx)
+            progress_label = utils.progress_generator(decode_mask)
+            pro_loss = self.bce_loss(prob.squeeze(), progress_label)
+            pro_loss = pro_loss * args.proWeight
+            self.loss += pro_loss
+            self.logs['pro_loss'].append(pro_loss.detach())
+
+        else:
+            self.logs['pro_loss'].append(0)
+
+        # aux #3: inst matching
+        if abs(args.matWeight - 0) > eps:
+            # for i in range(v_ctx.size(1)):
+            # h1 = v_ctx[:,i,:]
+            h1 = v_ctx[:, -1, :]
+            batch_size = h1.shape[0]
+            rand_idx = torch.randperm(batch_size)
+            order_idx = torch.arange(0, batch_size)
+            perm_h1 = h1[rand_idx, :]
+            matching_mask = torch.empty(batch_size).random_(2).bool()
+            same_idx = rand_idx == order_idx
+            label = (matching_mask | same_idx).float().unsqueeze(1).cuda()  # 1 same, 0 different
+            new_h1 = label * h1 + (1 - label) * h1[rand_idx, :]
+            if args.modmat:
+                mat_att, _ = self.matching_attention(h1, ctx, output_tilde=False)
+                vl_pair = torch.cat((new_h1, mat_att), dim=1)
+                # vl_pair = torch.cat((new_h1, h_0), dim=1)
+            else:
+                if multi:
+                    mean_ctx = torch.zeros_like(new_h1).cuda()
+                    for i in range(args.multiNum):
+                        mean_ctx += torch.mean(ctx[i].detach(), dim=1)
+                else:
+                    mean_ctx = torch.mean(ctx.detach(), dim=1)
+                vl_pair = torch.cat((new_h1, mean_ctx), dim=1)
+            prob = self.matching_network(vl_pair)
+            # print(prob)
+            mat_loss = self.bce_loss(prob, label) * args.matWeight
+            self.loss += mat_loss
+            self.logs['mat_loss'].append(mat_loss.detach())
+        else:
+            self.logs['mat_loss'].append(0)
+
+        # aux #4: feature prediction
+        fea_loss = fea_loss * args.feaWeight
+        self.loss += fea_loss
+        self.logs['fea_loss'].append(fea_loss.detach())
+
+        # aux #5: angle prediction
+        ang_loss = ang_loss * args.angWeight
+        self.loss += ang_loss
+        self.logs['ang_loss'].append(ang_loss.detach())
+
+
 
         if type(self.loss) is int:  # For safety, it will be activated if no losses are added
             self.losses.append(0.)
@@ -657,14 +930,14 @@ class Seq2SeqAgent(BaseAgent):
         recover_idx = np.zeros_like(perm_idx)
         for i, idx in enumerate(perm_idx):
             recover_idx[idx] = i
-        ctx, h_t, c_t = self.encoder(seq, seq_lengths)
-        ctx, h_t, c_t, ctx_mask = ctx[recover_idx], h_t[recover_idx], c_t[recover_idx], seq_mask[recover_idx]    # Recover the original order
+        ctx, h_t, candidate_feat = self.encoder(seq, seq_lengths)
+        ctx, h_t, candidate_feat, ctx_mask = ctx[recover_idx], h_t[recover_idx], candidate_feat[recover_idx], seq_mask[recover_idx]    # Recover the original order
 
         # Dijk Graph States:
         id2state = [
             {make_state_id(ob['viewpoint'], -95):
                  {"next_viewpoint": ob['viewpoint'],
-                  "running_state": (h_t[i], h_t[i], c_t[i]),
+                  "running_state": (h_t[i], h_t[i], candidate_feat[i]),
                   "location": (ob['viewpoint'], ob['heading'], ob['elevation']),
                   "feature": None,
                   "from_state_id": None,
@@ -706,8 +979,8 @@ class Seq2SeqAgent(BaseAgent):
                             ended[i] = True
 
             # Gather the running state in the batch
-            h_ts, h1s, c_ts = zip(*(idXstate[1]['running_state'] for idXstate in smallest_idXstate))
-            h_t, h1, c_t = torch.stack(h_ts), torch.stack(h1s), torch.stack(c_ts)
+            h_ts, h1s, candidate_feats = zip(*(idXstate[1]['running_state'] for idXstate in smallest_idXstate))
+            h_t, h1, candidate_feat = torch.stack(h_ts), torch.stack(h1s), torch.stack(candidate_feats)
 
             # Recover the env and gather the feature
             for i, (state_id, state) in enumerate(smallest_idXstate):
@@ -733,8 +1006,8 @@ class Seq2SeqAgent(BaseAgent):
             input_a_t, f_t, candidate_feat, candidate_leng = self.get_input_feat(obs)
 
             # Run one decoding step
-            h_t, c_t, alpha, logit, h1 = self.decoder(input_a_t, f_t, candidate_feat,
-                                                      h_t, h1, c_t,
+            h_t, candidate_feat, alpha, logit, h1 = self.decoder(input_a_t, f_t, candidate_feat,
+                                                      h_t, h1, candidate_feat,
                                                       ctx, ctx_mask,
                                                       False)
 
@@ -772,7 +1045,7 @@ class Seq2SeqAgent(BaseAgent):
                         id2state[i][next_id] = {
                             "next_viewpoint": next_viewpoint,
                             "location": location,
-                            "running_state": (h_t[i], h1[i], c_t[i]),
+                            "running_state": (h_t[i], h1[i], candidate_feat[i]),
                             "from_state_id": current_state_id,
                             "feature": (f_t[i].detach().cpu(), candidate_feat[i][j].detach().cpu()),
                             "score": new_score,
@@ -924,6 +1197,10 @@ class Seq2SeqAgent(BaseAgent):
             model.train()
             optimizer.zero_grad()
 
+        for model in self.aux_models:
+            model.train()
+        self.aux_optimizer.zero_grad()
+
     def accumulate_gradient(self, feedback='teacher', **kwargs):
         if feedback == 'teacher':
             self.feedback = 'teacher'
@@ -945,6 +1222,8 @@ class Seq2SeqAgent(BaseAgent):
         self.encoder_optimizer.step()
         self.decoder_optimizer.step()
         self.critic_optimizer.step()
+        if not args.fix_aux_func:
+            self.aux_optimizer.step()
 
     def train(self, n_iters, feedback='teacher', **kwargs):
         ''' Train for a given number of iterations '''
@@ -953,6 +1232,8 @@ class Seq2SeqAgent(BaseAgent):
         self.encoder.train()
         self.decoder.train()
         self.critic.train()
+        # for model in self.aux_models:
+        #     model.train()
 
         self.losses = []
         for iter in range(1, n_iters + 1):
@@ -960,6 +1241,7 @@ class Seq2SeqAgent(BaseAgent):
             self.encoder_optimizer.zero_grad()
             self.decoder_optimizer.zero_grad()
             self.critic_optimizer.zero_grad()
+            self.aux_optimizer.zero_grad()
 
             self.loss = 0
             if feedback == 'teacher':
@@ -968,9 +1250,9 @@ class Seq2SeqAgent(BaseAgent):
             elif feedback == 'sample':
                 if args.ml_weight != 0:
                     self.feedback = 'teacher'
-                    self.rollout(train_ml=args.ml_weight, train_rl=False, **kwargs)
+                    self.rollout(train_ml=args.ml_weight, train_rl=False, multi = args.multi, **kwargs)
                 self.feedback = 'sample'
-                self.rollout(train_ml=None, train_rl=True, **kwargs)
+                self.rollout(train_ml=None, train_rl=True, multi= args.multi, **kwargs )
             else:
                 assert False
 
@@ -982,6 +1264,8 @@ class Seq2SeqAgent(BaseAgent):
             self.encoder_optimizer.step()
             self.decoder_optimizer.step()
             self.critic_optimizer.step()
+            if not args.fix_aux_func:
+                self.aux_optimizer.step()
 
     def save(self, epoch, path):
         ''' Snapshot models '''
@@ -994,10 +1278,12 @@ class Seq2SeqAgent(BaseAgent):
                 'state_dict': model.state_dict(),
                 'optimizer': optimizer.state_dict(),
             }
-        all_tuple = [("encoder", self.encoder, self.encoder_optimizer),
-                     ("decoder", self.decoder, self.decoder_optimizer),
-                     ("critic", self.critic, self.critic_optimizer)]
-        for param in all_tuple:
+        # all_tuple = [("encoder", self.encoder, self.encoder_optimizer),
+        #              ("decoder", self.decoder, self.decoder_optimizer),
+        #              ("critic", self.critic, self.critic_optimizer)]
+        # for param in all_tuple:
+        #     create_state(*param)
+        for param in self.all_tuple:
             create_state(*param)
         torch.save(states, path)
 
@@ -1014,10 +1300,15 @@ class Seq2SeqAgent(BaseAgent):
             model.load_state_dict(state)
             if args.loadOptim:
                 optimizer.load_state_dict(states[name]['optimizer'])
-        all_tuple = [("encoder", self.encoder, self.encoder_optimizer),
-                     ("decoder", self.decoder, self.decoder_optimizer),
-                     ("critic", self.critic, self.critic_optimizer)]
-        for param in all_tuple:
+
+        for param in self.all_tuple:
             recover_state(*param)
+        #     if args.loadOptim:
+        #         optimizer.load_state_dict(states[name]['optimizer'])
+        # all_tuple = [("encoder", self.encoder, self.encoder_optimizer),
+        #              ("decoder", self.decoder, self.decoder_optimizer),
+        #              ("critic", self.critic, self.critic_optimizer)]
+        # for param in all_tuple:
+        #     recover_state(*param)
         return states['encoder']['epoch'] - 1
 

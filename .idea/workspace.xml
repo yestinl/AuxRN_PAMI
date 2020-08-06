@@ -2,13 +2,9 @@
 <project version="4">
   <component name="ChangeListManager">
     <list default="true" id="1034fbd4-8ca4-4e6f-bd56-3506d6963942" name="Default Changelist" comment="">
-      <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/polyaxonfile.yml" beforeDir="false" afterPath="$PROJECT_DIR$/polyaxonfile.yml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/r2r_src/agent.py" beforeDir="false" afterPath="$PROJECT_DIR$/r2r_src/agent.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/r2r_src/env.py" beforeDir="false" afterPath="$PROJECT_DIR$/r2r_src/env.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/r2r_src/eval.py" beforeDir="false" afterPath="$PROJECT_DIR$/r2r_src/eval.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/r2r_src/model.py" beforeDir="false" afterPath="$PROJECT_DIR$/r2r_src/model.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/r2r_src/utils.py" beforeDir="false" afterPath="$PROJECT_DIR$/r2r_src/utils.py" afterDir="false" />
     </list>
     <option name="EXCLUDED_CONVERTED_TO_IGNORED" value="true" />
     <option name="SHOW_DIALOG" value="false" />
@@ -30,8 +26,8 @@
       <file pinned="false" current-in-tab="true">
         <entry file="file://$PROJECT_DIR$/polyaxonfile.yml">
           <provider selected="true" editor-type-id="text-editor">
-            <state>
-              <caret column="10" lean-forward="true" selection-start-column="10" selection-end-column="10" />
+            <state relative-caret-position="374">
+              <caret line="17" column="134" selection-start-line="17" selection-start-column="134" selection-end-line="17" selection-end-column="134" />
             </state>
           </provider>
         </entry>
@@ -39,7 +35,7 @@
       <file pinned="false" current-in-tab="false">
         <entry file="file://$PROJECT_DIR$/r2r_src/train.py">
           <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="176">
+            <state relative-caret-position="902">
               <caret line="41" column="15" lean-forward="true" selection-start-line="41" selection-start-column="15" selection-end-line="41" selection-end-column="15" />
               <folding>
                 <element signature="e#0#22#0" expanded="true" />
@@ -60,15 +56,6 @@
           </provider>
         </entry>
       </file>
-      <file pinned="false" current-in-tab="false">
-        <entry file="file://$PROJECT_DIR$/r2r_src/agent.py">
-          <provider selected="true" editor-type-id="text-editor">
-            <state relative-caret-position="15946">
-              <caret line="970" selection-start-line="970" selection-end-line="970" />
-            </state>
-          </provider>
-        </entry>
-      </file>
     </leaf>
   </component>
   <component name="FindInProjectRecents">
@@ -81,6 +68,7 @@
       <find>length2</find>
       <find>obj_d_feature</find>
       <find>self.feature_size</find>
+      <find>modspe</find>
     </findStrings>
   </component>
   <component name="Git.Settings">
@@ -95,12 +83,12 @@
         <option value="$PROJECT_DIR$/r2r_src/train.py" />
         <option value="$PROJECT_DIR$/polyaxonfile_group.yml" />
         <option value="$PROJECT_DIR$/r2r_src/model.py" />
-        <option value="$PROJECT_DIR$/polyaxonfile.yml" />
         <option value="$PROJECT_DIR$/r2r_src/agent.py" />
+        <option value="$PROJECT_DIR$/polyaxonfile.yml" />
       </list>
     </option>
   </component>
-  <component name="ProjectFrameBounds" extendedState="6">
+  <component name="ProjectFrameBounds" extendedState="7">
     <option name="x" value="-8" />
     <option name="y" value="-1088" />
     <option name="width" value="1936" />
@@ -310,10 +298,11 @@
     <servers />
   </component>
   <component name="TimeTrackingManager">
-    <option name="totallyTimeSpent" value="40910000" />
+    <option name="totallyTimeSpent" value="41367000" />
   </component>
   <component name="ToolWindowManager">
     <frame x="-8" y="-1088" width="1936" height="1056" extended-state="6" />
+    <editor active="true" />
     <layout>
       <window_info active="true" content_ui="combo" id="Project" order="0" visible="true" weight="0.17910448" />
       <window_info id="Structure" order="1" side_tool="true" weight="0.25" />
@@ -507,23 +496,23 @@
         </state>
       </provider>
     </entry>
-    <entry file="file://$PROJECT_DIR$/r2r_src/agent.py">
-      <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="15946">
-          <caret line="970" selection-start-line="970" selection-end-line="970" />
-        </state>
-      </provider>
-    </entry>
     <entry file="file://$PROJECT_DIR$/r2r_src/bleu.py">
       <provider selected="true" editor-type-id="text-editor" />
     </entry>
     <entry file="file://$PROJECT_DIR$/r2r_src/train.py">
       <provider selected="true" editor-type-id="text-editor">
-        <state relative-caret-position="176">
+        <state relative-caret-position="902">
           <caret line="41" column="15" lean-forward="true" selection-start-line="41" selection-start-column="15" selection-end-line="41" selection-end-column="15" />
           <folding>
             <element signature="e#0#22#0" expanded="true" />
           </folding>
+        </state>
+      </provider>
+    </entry>
+    <entry file="file://$PROJECT_DIR$/r2r_src/agent.py">
+      <provider selected="true" editor-type-id="text-editor">
+        <state relative-caret-position="280">
+          <caret line="110" column="23" lean-forward="true" selection-start-line="110" selection-start-column="23" selection-end-line="110" selection-end-column="23" />
         </state>
       </provider>
     </entry>
@@ -539,8 +528,8 @@
     </entry>
     <entry file="file://$PROJECT_DIR$/polyaxonfile.yml">
       <provider selected="true" editor-type-id="text-editor">
-        <state>
-          <caret column="10" lean-forward="true" selection-start-column="10" selection-end-column="10" />
+        <state relative-caret-position="374">
+          <caret line="17" column="134" selection-start-line="17" selection-start-column="134" selection-end-line="17" selection-end-column="134" />
         </state>
       </provider>
     </entry>

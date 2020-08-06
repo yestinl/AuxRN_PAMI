@@ -92,21 +92,31 @@ class Evaluation(object):
             assert len(self.scores['nav_errors']) == len(self.instr_ids)
         score_summary = {
             'nav_error': np.average(self.scores['nav_errors']),
-            'oracle_error': np.average(self.scores['oracle_errors']),
-            'steps': np.average(self.scores['trajectory_steps']),
-            'lengths': np.average(self.scores['trajectory_lengths'])
+            'lengths': np.average(self.scores['trajectory_lengths']),
         }
-        num_successes = len([i for i in self.scores['nav_errors'] if i < self.error_margin])
-        score_summary['success_rate'] = float(num_successes)/float(len(self.scores['nav_errors']))
         oracle_successes = len([i for i in self.scores['oracle_errors'] if i < self.error_margin])
         score_summary['oracle_rate'] = float(oracle_successes)/float(len(self.scores['oracle_errors']))
-
+        num_successes = len([i for i in self.scores['nav_errors'] if i < self.error_margin])
+        score_summary['success_rate'] = float(num_successes)/float(len(self.scores['nav_errors']))
         spl = [float(error < self.error_margin) * l / max(l, p, 0.01)
             for error, p, l in
             zip(self.scores['nav_errors'], self.scores['trajectory_lengths'], self.scores['shortest_lengths'])
         ]
         score_summary['spl'] = np.average(spl)
-        return score_summary, self.scores
+        score_summary['oracle_error'] = np.average(self.scores['oracle_errors'])
+        score_summary['steps'] = np.average(self.scores['trajectory_steps'])
+        if args.analizePath:
+            success_path = []
+            error_path = []
+            for i,d in enumerate(self.scores['nav_errors']):
+                if d < self.error_margin:
+                    success_path.append(results[i])
+                else:
+                    error_path.append(results[i])
+            return score_summary, self.scores, success_path, error_path
+        else:
+            return score_summary, self.scores
+
 
     def bleu_score(self, path2inst):
         from bleu import compute_bleu

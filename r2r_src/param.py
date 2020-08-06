@@ -48,11 +48,11 @@ class Param:
         self.parser.add_argument("--submit", action='store_const', default=False, const=True)
         self.parser.add_argument("--beam", action="store_const", default=False, const=True)
         self.parser.add_argument("--alpha", type=float, default=0.5)
-
+        self.parser.add_argument("--upload", action='store_const', default=False, const=True)
 
         # Training Configurations
         self.parser.add_argument('--optim', type=str, default='rms')    # rms, adam
-        self.parser.add_argument('--lr', type=float, default=0.0001, help="The learning rate")
+        self.parser.add_argument('--lr', type=float, default=0.0001, help="fThe learning rate")
         self.parser.add_argument('--decay', dest='weight_decay', type=float, default=0.)
         self.parser.add_argument('--dropout', type=float, default=0.5)
         self.parser.add_argument('--feedback', type=str, default='sample',
@@ -78,18 +78,19 @@ class Param:
 
         self.parser.add_argument("--angleFeatSize", dest="angle_feat_size", type=int, default=128)
 
-        # A2C
-        self.parser.add_argument("--gamma", default=0.9, type=float)
-        self.parser.add_argument("--normalize", dest="normalize_loss", default="total", type=str, help='batch or total')
+        # aux loss
+        self.parser.add_argument('--speWeight', type=float, default=0)
+        self.parser.add_argument('--proWeight', type=float, default=0)
+        self.parser.add_argument('--matWeight', type=float, default=0)
+        self.parser.add_argument('--feaWeight', type=float, default=0)
+        self.parser.add_argument('--angWeight', type=float, default=0)
+        self.parser.add_argument('--test_train_num', type=int, default=3)
+        self.parser.add_argument('--tt_lr', type=float, default=1e-4)
+        self.parser.add_argument('--fix_aux_func', action="store_const", default=False, const=True)
+        self.parser.add_argument("--modspe", action='store_const', default=False, const=True)
+        self.parser.add_argument("--modmat", action='store_const', default=False, const=True)
 
-        # polyaxon
-        self.parser.add_argument("--upload", action='store_const', default=False, const=True)
-
-        # Multi_head
-        self.parser.add_argument("--headNum", dest="headNum", type=int, default=2)
-        self.parser.add_argument("--multiMode", type=str, default="")  # vis,can,ins
-
-        # object
+        # obj
         self.parser.add_argument('--objdir', type=str, default='0_8')
         self.parser.add_argument("--objthr", dest='objthr', type=float, default=0.99)
         self.parser.add_argument("--angleObjSize", dest="angle_bbox_size", type=int, default=8)
@@ -99,10 +100,27 @@ class Param:
         self.parser.add_argument("--addRN", dest='addRN', action='store_const', default=False, const=True)
         self.parser.add_argument("--denseObj", dest='denseObj', action='store_const', default=False, const=True)
         self.parser.add_argument("--longCat", dest='longCat', action='store_const', default=False, const=True)
-        self.parser.add_argument("--objInputMode", type=str, default="sg")  # tanh,sg,sm
-        # self.parser.add_argument("--objType", type=str, default="dense")  # dense, denseRN, sparseRN, denSpaRN,
+        self.parser.add_argument("--objInputMode", type=str, default="tanh")  # tanh,sg,sm
         # self.parser.add_argument("--catAngleBbox", dest='catAngleBbox', action='store_const', default=False, const=True)
-        self.parser.add_argument("--catfeat", type=str, default="none")  # none,he,bbox,angle,bboxAngle
+        self.parser.add_argument("--catfeat", type=str, default="none") # none,he,bbox,angle,bboxAngle
+
+        # Multi_view
+        self.parser.add_argument("--multi", dest='multi', action='store_const', default=False, const=True)
+        self.parser.add_argument("--multiNum", dest="multiNum", type=int, default=3)
+
+        # Multi
+        self.parser.add_argument("--headNum", dest="headNum", type=int, default=2)
+        self.parser.add_argument("--multiMode", type=str, default="") # vis,can,ins
+
+        # visualize
+        self.parser.add_argument("--analizePath", dest='analizePath', action='store_const', default=False, const=True)
+
+        # debug
+        self.parser.add_argument("--seed", dest="seed", type=float, default=100)
+
+        # A2C
+        self.parser.add_argument("--gamma", default=0.9, type=float)
+        self.parser.add_argument("--normalize", dest="normalize_loss", default="total", type=str, help='batch or total')
 
         self.args = self.parser.parse_args()
 

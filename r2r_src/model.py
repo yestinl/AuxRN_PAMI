@@ -335,13 +335,12 @@ class AttnDecoderLSTM(nn.Module):
     def forward(self, action, cand_feat,
                 prev_h1, c_0,
                 ctx, ctx_mask=None,feature=None, sparseObj=None,denseObj=None,ObjFeature_mask=None,
-                already_dropfeat=False):
+                already_dropfeat=False,multi=False):
         '''
         Takes a single step in the decoder LSTM (allowing sampling).
         action: batch x angle_feat_size
         feature: batch x 36 x (feature_size + angle_feat_size)
         cand_feat: batch x cand x (feature_size + angle_feat_size)
-        h_0: batch x hidden_size
         prev_h1: batch x hidden_size
         c_0: batch x hidden_size
         ctx: batch x seq_len x dim
@@ -400,12 +399,21 @@ class AttnDecoderLSTM(nn.Module):
                 attn_feat = torch.cat([RN_attn_feat, dense_input_feat, sparse_attn_feat],1)
         else:
             attn_feat = RN_attn_feat
+        # attn_feat, _ = self.feat_att_layer(prev_h1_drop, feature, output_tilde=False)
 
         concat_input = torch.cat((action_embeds, attn_feat), 1) # (batch, embedding_size+feature_size)
         h_1, c_1 = self.lstm(concat_input, (prev_h1, c_0))
 
         h_1_drop = self.drop(h_1)
-        h_tilde, alpha = self.attention_layer(h_1_drop, ctx, ctx_mask)
+
+        if multi:
+            h_tilde = torch.zeros_like(h_1_drop).cuda()
+            for i in range(args.multiNum):
+                h_tilde_i, _ = self.attention_layer(h_1_drop, ctx[i], ctx_mask[i])
+                h_tilde += h_tilde_i
+            h_tilde /= args.multiNum
+        else:
+            h_tilde, _ = self.attention_layer(h_1_drop, ctx, ctx_mask)
 
         # Adding Dropout
         h_tilde_drop = self.drop(h_tilde)
@@ -417,6 +425,206 @@ class AttnDecoderLSTM(nn.Module):
 
         return h_1, c_1, logit, h_tilde
 
+class AttnDecoderLSTM_LongCat(nn.Module):
+    ''' An unrolled LSTM with attention over instructions for decoding navigation actions. '''
+
+    def __init__(self, embedding_size, hidden_size,
+                       dropout_ratio):
+        super(AttnDecoderLSTM_LongCat, self).__init__()
+        if args.sparseObj and (not args.denseObj):
+            print("Train in sparseObj mode")
+            feature_size = args.glove_emb+args.angle_bbox_size  # 308
+            if args.catRN:
+                print("Train in sparseObj+RN mode")
+                feature_size = args.glove_emb+args.angle_bbox_size+args.feature_size+args.angle_feat_size # 2484
+        elif args.denseObj and (not args.sparseObj):
+            print("Train in denseObj mode")
+            # feature_size = args.feature_size+args.angle_feat_size   # 2176
+            if args.catRN:
+                print("Train in denseObj long cat RN mode")
+                # feature_size = args.feature_size*2+args.angle_feat_size*2 # 4352
+                feature_size = args.feature_size + args.angle_feat_size  # 2176
+                # self.att_fc = nn.Linear(feature_size, args.feature_size) # run denseObj_RN_FC_0
+        #     if args.addRN:
+        #         print("Train in denseObj add RN mode")
+        #         feature_size = args.feature_size + args.angle_feat_size
+        # elif args.denseObj and args.sparseObj:
+        #     print("Train in sparseObj + denseObj mode")
+        #     feature_size = args.feature_size+args.angle_feat_size+args.glove_emb+args.angle_bbox_size # 2484
+        #     if args.catRN:
+        #         print("Train in sparseObj+denseObj+RN mode")
+        #         feature_size = args.feature_size*2+args.angle_feat_size*2+args.glove_emb+args.angle_bbox_size # 4660
+        # else:
+        #     print("Train in RN mode")
+        #     feature_size = args.feature_size+args.angle_feat_size # 2176
+        print('feature_size: %d'%feature_size)
+        self.embedding_size = embedding_size
+        self.feature_size = feature_size
+        self.hidden_size = hidden_size
+        self.embedding = nn.Sequential(
+            nn.Linear(args.angle_feat_size, self.embedding_size),
+            nn.Tanh()
+        )
+        self.drop = nn.Dropout(p=dropout_ratio)
+        self.drop_env = nn.Dropout(p=args.featdropout)
+        self.lstm_v = nn.LSTMCell(embedding_size+feature_size, hidden_size)
+        self.lstm_o = nn.LSTMCell(embedding_size+feature_size, hidden_size)
+        self.feat_att_layer = SoftDotAttention(hidden_size, args.feature_size+args.angle_feat_size)
+        if args.denseObj:
+            self.dense_att_layer = SoftDotAttention(hidden_size, args.feature_size + args.angle_feat_size)
+            # self.dense_att_layer = SoftDotAttention(hidden_size, args.feature_size)
+        if args.sparseObj:
+            self.sparse_att_layer = SoftDotAttention(hidden_size, args.glove_emb+args.angle_bbox_size)
+        self.attention_layer_v = SoftDotAttention(hidden_size, hidden_size)
+        self.attention_layer_o = SoftDotAttention(hidden_size, hidden_size)
+        self.candidate_att_layer = SoftDotAttention(hidden_size*2, args.feature_size+args.angle_feat_size)
+
+    def forward(self, action, cand_feat,
+                prev_h1_v,prev_h1_o, c_0_v, c_0_o,
+                ctx, ctx_mask=None,feature=None, sparseObj=None,denseObj=None,ObjFeature_mask=None,
+                already_dropfeat=False):
+        '''
+        Takes a single step in the decoder LSTM (allowing sampling).
+        action: batch x angle_feat_size
+        feature: batch x 36 x (feature_size + angle_feat_size)
+        cand_feat: batch x cand x (feature_size + angle_feat_size)
+        h_0: batch x hidden_size
+        prev_h1: batch x hidden_size
+        c_0: batch x hidden_size
+        ctx: batch x seq_len x dim
+        ctx_mask: batch x seq_len - indices to be masked
+        already_dropfeat: used in EnvDrop
+        '''
+        action_embeds = self.embedding(action)
+
+        # Adding Dropout
+        action_embeds = self.drop(action_embeds)
+
+        if not already_dropfeat:
+            if sparseObj is not None:
+                sparseObj[..., :-args.angle_bbox_size] = self.drop_env(sparseObj[..., :-args.angle_bbox_size])
+            if denseObj is not None:
+                # denseObj[..., :-args.angle_feat_size] = self.drop_env(denseObj[..., :-args.angle_feat_size])
+                denseObj[..., -args.angle_feat_size] = self.drop_env(denseObj[..., -args.angle_feat_size])
+            if feature is not None:
+                # Dropout the raw feature as a common regularization
+                feature[..., :-args.angle_feat_size] = self.drop_env(
+                    feature[..., :-args.angle_feat_size])  # Do not drop the last args.angle_feat_size (position feat)
+
+        prev_h1_v_drop = self.drop(prev_h1_v)
+        prev_h1_o_drop = self.drop(prev_h1_o)
+
+        # if sparseObj is not None:
+        #     sparse_attn_feat, _ = self.sparse_att_layer(prev_h1_drop, sparseObj, mask=ObjFeature_mask,
+        #                                                 output_tilde=False)
+        if denseObj is not None:
+            # denseObj[..., :-args.angle_feat_size] = self.drop_env(denseObj[..., :-args.angle_feat_size])
+            dense_attn_feat, _ = self.dense_att_layer(prev_h1_o_drop, denseObj, mask=ObjFeature_mask,
+                                                      output_tilde=False)  # input:(64,512)(64,k,2176) output:(64,2176)
+        if feature is not None:
+            # Dropout the raw feature as a common regularization
+            RN_attn_feat, _ = self.feat_att_layer(prev_h1_v_drop, feature,
+                                                  output_tilde=False)  # input: (64,512), (64,36,2176) output:(64,2176)
+
+        # if args.sparseObj and(not args.denseObj):
+        #     attn_feat = sparse_attn_feat
+        #     if args.catRN:
+        #         attn_feat = torch.cat([RN_attn_feat,sparse_attn_feat],1)
+        # elif args.denseObj and (not args.sparseObj):
+        #     attn_feat = dense_attn_feat
+        #     if args.catRN:
+        #         attn_feat = torch.cat([RN_attn_feat, dense_attn_feat], 1) #(64,4352)
+        #         # attn_feat = self.att_fc(attn_feat) # run denseObj_RN_FC_0
+        #     if args.addRN:
+        #         attn_feat = dense_attn_feat+RN_attn_feat[:,:args.feature_size]
+        #         attn_feat = torch.cat([attn_feat, RN_attn_feat[:,args.feature_size:]], 1)
+        # elif args.denseObj and args.sparseObj:
+        #     attn_feat = torch.cat([dense_attn_feat,sparse_attn_feat], 1)
+        #     if args.catRN:
+        #         attn_feat = torch.cat([RN_attn_feat, dense_attn_feat, sparse_attn_feat],1)
+        # else:
+        #     attn_feat = RN_attn_feat
+        # attn_feat, _ = self.feat_att_layer(prev_h1_drop, feature, output_tilde=False)
+
+        concat_input_v = torch.cat((action_embeds, RN_attn_feat), 1) # (batch, embedding_size+feature_size)
+        h_1_v, c_1_v = self.lstm_v(concat_input_v, (prev_h1_v, c_0_o))
+        h_1_drop_v = self.drop(h_1_v)
+        h_tilde_v, _= self.attention_layer_v(h_1_drop_v, ctx, ctx_mask)
+        # h_tilde_v_drop = self.drop(h_tilde_v)
+
+        concat_input_o = torch.cat((action_embeds, dense_attn_feat), 1)
+        h_1_o, c_1_o = self.lstm_o(concat_input_o, (prev_h1_o, c_0_o))
+        h_1_o_drop = self.drop(h_1_o)
+        h_tilde_o, _ = self.attention_layer_o(h_1_o_drop, ctx, ctx_mask)
+        # h_tilde_o_drop = self.drop(h_tilde_o)
+
+        h_tilde = torch.cat((h_tilde_v, h_tilde_o), 1)
+        h_tilde_drop = self.drop(h_tilde)
+
+
+        if not already_dropfeat:
+            cand_feat[..., :-args.angle_feat_size] = self.drop_env(cand_feat[..., :-args.angle_feat_size])
+
+        _, logit = self.candidate_att_layer(h_tilde_drop, cand_feat, output_prob=False)
+
+        return h_1_v, h_1_o, c_1_v, c_1_o, logit, h_tilde_v, h_tilde_o
+
+
+class MatchingNetwork(nn.Module):
+    def __init__(self):
+        super(MatchingNetwork, self).__init__()
+        hidden_size = args.rnn_dim
+        self.fc1 = nn.Linear(hidden_size*2, hidden_size)
+        self.relu1 = nn.LeakyReLU()
+        self.fc2 = nn.Linear(hidden_size, 1)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, h):
+        h = self.relu1(self.fc1(h))
+        h = self.sigmoid(self.fc2(h))
+        # h = torch.mean(h, dim=1) # pooling, harm performance
+        return h
+
+class FeaturePredictor(nn.Module):
+    def __init__(self):
+        super(FeaturePredictor, self).__init__()
+        hidden_size = args.rnn_dim
+        self.fc1 = nn.Linear(hidden_size, hidden_size)
+        self.relu1 = nn.LeakyReLU()
+        self.fc2 = nn.Linear(hidden_size, args.feature_size)
+
+    def forward(self, h):
+        h = self.relu1(self.fc1(h))
+        h = self.fc2(h)
+        return h
+
+class AnglePredictor(nn.Module):
+    def __init__(self):
+        super(AnglePredictor, self).__init__()
+        hidden_size = args.rnn_dim
+        self.fc1 = nn.Linear(hidden_size, hidden_size)
+        self.relu1 = nn.LeakyReLU()
+        self.fc2 = nn.Linear(hidden_size, 4)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, h):
+        h = self.relu1(self.fc1(h))
+        h = self.sigmoid(self.fc2(h))
+        return h
+
+class ProgressIndicator(nn.Module):
+    def __init__(self):
+        super(ProgressIndicator, self).__init__()
+        hidden_size = args.rnn_dim
+        self.fc1 = nn.Linear(hidden_size, hidden_size)
+        self.relu1 = nn.LeakyReLU()
+        self.fc2 = nn.Linear(hidden_size, 1)
+        self.sigmoid = nn.Sigmoid()
+
+    def forward(self, h):
+        h = self.relu1(self.fc1(h))
+        h = self.sigmoid(self.fc2(h))
+        return h
 
 class Critic(nn.Module):
     def __init__(self):
@@ -451,7 +659,7 @@ class SpeakerEncoder(nn.Module):
         self.post_lstm = nn.LSTM(self.hidden_size, self.hidden_size // self.num_directions, self.num_layers,
                                  batch_first=True, dropout=dropout_ratio, bidirectional=bidirectional)
 
-    def forward(self, action_embeds, feature, lengths, already_dropfeat=False):
+    def forward(self, action_embeds, feature, lengths, already_dropfeat=False, objMask=None, objFeat=None):
         """
         :param action_embeds: (batch_size, length, 2052). The feature of the view
         :param feature: (batch_size, length, 36, 2052). The action taken (with the image feature)
@@ -470,6 +678,7 @@ class SpeakerEncoder(nn.Module):
         batch_size, max_length, _ = ctx.size()
         if not already_dropfeat:
             feature[..., :-args.angle_feat_size] = self.drop3(feature[..., :-args.angle_feat_size])   # Dropout the image feature
+            
         x, _ = self.attention_layer(                        # Attend to the feature map
             ctx.contiguous().view(-1, self.hidden_size),    # (batch, length, hidden) --> (batch x length, hidden)
             feature.view(batch_size * max_length, -1, self.feature_size),        # (batch, length, # of images, feature_size) --> (batch x length, # of images, feature_size)
@@ -499,7 +708,7 @@ class SpeakerDecoder(nn.Module):
             nn.Linear(128, 1)
         )
 
-    def forward(self, words, ctx, ctx_mask, h0, c0):
+    def forward(self, words, ctx, ctx_mask, h0, c0, objMask=None, objFeat=None):
         embeds = self.embedding(words)
         embeds = self.drop(embeds)
         x, (h1, c1) = self.lstm(embeds, (h0, c0))
@@ -526,5 +735,39 @@ class SpeakerDecoder(nn.Module):
         logit = self.projection(x)
 
         return logit, h1, c1
+
+class SpeakerDecoder_SameLSTM(SpeakerDecoder):
+    def __init__(self, vocab_size, embedding_size, padding_idx, hidden_size, dropout_ratio):
+        super(SpeakerDecoder_SameLSTM, self).__init__(vocab_size, embedding_size, padding_idx, hidden_size, dropout_ratio)
+
+    def forward(self, words, ctx, ctx_mask, x):
+        # embeds = self.embedding(words)
+        # embeds = self.drop(embeds)
+        # x, (h1, c1) = self.lstm(embeds, (h0, c0))
+
+        # x = self.drop(x)
+
+        # Get the size
+        batchXlength = words.size(0) * words.size(1)
+        multiplier = batchXlength // ctx.size(0)         # By using this, it also supports the beam-search
+
+        # Att and Handle with the shape
+        # Reshaping x          <the output> --> (b(word)*l(word), r)
+        # Expand the ctx from  (b, a, r)    --> (b(word)*l(word), a, r)
+        # Expand the ctx_mask  (b, a)       --> (b(word)*l(word), a)
+        x, _ = self.attention_layer(
+            x.contiguous().view(batchXlength, self.hidden_size),
+            ctx.unsqueeze(1).expand(-1, multiplier, -1, -1).contiguous(). view(batchXlength, -1, self.hidden_size),
+            mask=ctx_mask.unsqueeze(1).expand(-1, multiplier, -1).contiguous().view(batchXlength, -1)
+        )
+        x = x.view(words.size(0), words.size(1), self.hidden_size)
+
+        # Output the prediction logit
+        x = self.drop(x)
+        logit = self.projection(x)
+
+        return logit
+
+
 
 

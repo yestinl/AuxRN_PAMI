@@ -6,7 +6,7 @@ if args.upload:
 else:
     sys.path.insert(0, 'build')
 
-
+from utils import read_vocab,write_vocab,build_vocab,Tokenizer,padding_idx,timeSince, read_img_features, get_sync_dir, setup_seed
 
 # setup_seed(args.seed)
 
@@ -19,9 +19,9 @@ import numpy as np
 from collections import defaultdict
 from speaker import Speaker
 
-from utils import read_vocab,write_vocab,build_vocab,Tokenizer,padding_idx,timeSince, read_img_features, get_sync_dir
+
 import utils
-from env import R2RBatch
+from env import R2RBatch, R2RBatch_Multi
 from agent import Seq2SeqAgent
 from eval import Evaluation
 
@@ -40,6 +40,10 @@ from tensorboardX import SummaryWriter
 from polyaxon_client.tracking import get_outputs_path
 
 if args.upload:
+    # for filename in os.listdir(get_sync_dir(args.upload_path)):
+    #     print("filename: ", filename)
+    # print(get_sync_dir(args.upload_path))
+    # sys.exit()
     train_vocab = get_sync_dir(os.path.join(args.upload_path,args.TRAIN_VOCAB))
     trainval_vocab = get_sync_dir(os.path.join(args.upload_path,args.TRAINVAL_VOCAB))
     features = get_sync_dir(os.path.join(args.upload_path,args.IMAGENET_FEATURES))
@@ -78,6 +82,13 @@ def train_speaker(train_env, tok, n_iters, log_every=500, val_envs={}):
     listner = Seq2SeqAgent(train_env, "", tok, args.maxAction)
     speaker = Speaker(train_env, listner, tok)
 
+    if args.load is not None:
+        print("LOAD THE Speaker from %s" % args.load)
+        if args.upload:
+            speaker.load(get_sync_dir(args.load))
+        else:
+            speaker.load(os.path.join(args.load))
+
     if args.fast_train:
         log_every = 40
 
@@ -102,6 +113,7 @@ def train_speaker(train_env, tok, n_iters, log_every=500, val_envs={}):
             speaker.env = env
             path2inst, loss, word_accu, sent_accu = speaker.valid()
             path_id = next(iter(path2inst.keys()))
+            print('path_id:', path_id)
             print("Inference: ", tok.decode_sentence(path2inst[path_id]))
             print("GT: ", evaluator.gt[str(path_id)]['instructions'])
             bleu_score, precisions = evaluator.bleu_score(path2inst)
@@ -203,11 +215,25 @@ def train(train_env, tok, n_iters, log_every=100, val_envs={}, aug_env=None):
         total = max(sum(listner.logs['total']), 1)
         length = max(len(listner.logs['critic_loss']), 1)
         critic_loss = sum(listner.logs['critic_loss']) / total #/ length / args.batchSize
-        entropy = sum(listner.logs['entropy']) / total #/ length / args.batchSize
-        predict_loss = sum(listner.logs['us_loss']) / max(len(listner.logs['us_loss']), 1)
+        rl_loss = sum(listner.logs['rl_loss']) / total
+        ml_loss = sum(listner.logs['ml_loss']) / total
+        spe_loss = sum(listner.logs['spe_loss']) / total
+        pro_loss = sum(listner.logs['pro_loss']) / total
+        mat_loss = sum(listner.logs['mat_loss']) / total
+        fea_loss = sum(listner.logs['fea_loss']) / total
+        ang_loss = sum(listner.logs['ang_loss']) / total
+        # entropy = sum(listner.logs['entropy']) / total #/ length / args.batchSize
+        # predict_loss = sum(listner.logs['us_loss']) / max(len(listner.logs['us_loss']), 1)
+        writer.add_scalar("loss/ml_loss", ml_loss, idx)
+        writer.add_scalar("loss/rl_loss", rl_loss, idx)
         writer.add_scalar("loss/critic", critic_loss, idx)
-        writer.add_scalar("policy_entropy", entropy, idx)
-        writer.add_scalar("loss/unsupervised", predict_loss, idx)
+        writer.add_scalar("loss/spe_loss", spe_loss, idx)
+        writer.add_scalar("loss/pro_loss", pro_loss, idx)
+        writer.add_scalar("loss/mat_loss", mat_loss, idx)
+        writer.add_scalar("loss/fea_loss", fea_loss, idx)
+        writer.add_scalar("loss/ang_loss", ang_loss, idx)
+        # writer.add_scalar("policy_entropy", entropy, idx)
+        # writer.add_scalar("loss/unsupervised", predict_loss, idx)
         writer.add_scalar("total_actions", total, idx)
         writer.add_scalar("max_length", length, idx)
         print("total_actions", total)
@@ -222,22 +248,35 @@ def train(train_env, tok, n_iters, log_every=100, val_envs={}, aug_env=None):
             iters = None if args.fast_train or env_name != 'train' else 20     # 20 * 64 = 1280
 
             # Get validation distance from goal under test evaluation conditions
-            listner.test(use_dropout=False, feedback='argmax', iters=iters)
+            with torch.no_grad():
+                listner.test(use_dropout=False, feedback='argmax', iters=iters)
             result = listner.get_results()
             score_summary, _ = evaluator.score(result)
             loss_str += "%s " % env_name
             for metric,val in score_summary.items():
                 if metric in ['success_rate']:
-                    loss_str += ', %s: %.3f' % (metric, val)
                     writer.add_scalar("%s/accuracy" % env_name, val, idx)
                     if env_name in best_val:
                         if val > best_val[env_name]['accu']:
                             best_val[env_name]['accu'] = val
                             best_val[env_name]['update'] = True
+                if metric in ['nav_error']:
+                    writer.add_scalar("%s/nav_error" % env_name, val, idx)
+                if metric in ['oracle_error']:
+                    writer.add_scalar("%s/oracle_error" % env_name, val, idx)
                 if metric in ['spl']:
                     writer.add_scalar("%s/spl" % env_name, val, idx)
-                    loss_str += ', %s: %.3f' % (metric, val)
+                if metric in ['oracle_rate']:
+                    writer.add_scalar("%s/oracle_rate" % env_name, val, idx)
+                loss_str += ', %s: %.3f' % (metric, val)
             loss_str += '\n'
+        loss_str += 'ml_weight: %.1f' % (args.ml_weight)
+        # loss_str += ', rl_weight: %.1f' % (args.rl_weight)
+        loss_str += ', spe_weight: %.1f' % (args.speWeight)
+        loss_str += ', pro_weight: %.1f' % (args.proWeight)
+        loss_str += ', mat_weight: %.1f' % (args.matWeight)
+        loss_str += ', ang_weight: %.1f' % (args.angWeight)
+        loss_str += ', fea_weight: %.1f' % (args.feaWeight)
         loss_str += '\n'
 
         for env_name in best_val:
@@ -270,7 +309,12 @@ def valid(train_env, tok, val_envs={}):
         print("Loaded the listener model at iter %d from %s" % (agent.load(os.path.join(args.R2R_Aux_path, args.load)),
                                                                 os.path.join(args.R2R_Aux_path, args.load)))
 
+
+    # cnt = 0
     for env_name, (env, evaluator) in val_envs.items():
+        # if cnt < 2:
+        #     cnt += 1
+        #     continue
         agent.logs = defaultdict(list)
         agent.env = env
 
@@ -279,18 +323,35 @@ def valid(train_env, tok, val_envs={}):
         result = agent.get_results()
 
         if env_name != '':
-            score_summary, _ = evaluator.score(result)
+            loss_str1 = "%s" % env_name
+            if args.analizePath:
+                score_summary, _, success_path, error_path = evaluator.score(result)
+            else:
+                score_summary, _ = evaluator.score(result)
             loss_str = "Env name: %s" % env_name
             for metric,val in score_summary.items():
                 loss_str += ', %s: %.4f' % (metric, val)
+                loss_str1 += " %.4f" % val
             print(loss_str)
-
+            print(loss_str1)
+        # break
         if args.submit:
             json.dump(
                 result,
                 open(os.path.join(log_dir, "submit_%s.json" % env_name), 'w'),
                 sort_keys=True, indent=4, separators=(',', ': ')
             )
+            if args.analizePath:
+                json.dump(
+                    success_path,
+                    open(os.path.join(log_dir, "success_path_%s.json" % env_name), 'w'),
+                    sort_keys=True, indent=4, separators=(',', ': ')
+                )
+                json.dump(
+                    error_path,
+                    open(os.path.join(log_dir, "error_path_%s.json" % env_name), 'w'),
+                    sort_keys=True, indent=4, separators=(',', ': ')
+                )
 
 
 def beam_valid(train_env, tok, val_envs={}):
@@ -298,10 +359,14 @@ def beam_valid(train_env, tok, val_envs={}):
 
     speaker = Speaker(train_env, listener, tok)
     if args.speaker is not None:
-        print("Load the speaker from %s." % args.speaker)
-        speaker.load(args.speaker)
-
-    print("Loaded the listener model at iter % d" % listener.load(args.load))
+        if args.upload:
+            print("Load the speaker from %s." % os.path.join(args.upload_path, args.speaker))
+            speaker.load(get_sync_dir(os.path.join(args.upload_path, args.speaker)))
+            print("Loaded the listener model at iter % d" % listener.load(get_sync_dir(os.path.join(args.upload_path, args.load))))
+        else:
+            print("Load the speaker from %s." % os.path.join(args.R2R_Aux_path, args.speaker))
+            speaker.load(os.path.join(args.R2R_Aux_path, args.speaker))
+            print("Loaded the listener model at iter % d" % listener.load(os.path.join(args.R2R_Aux_path, args.load)))
 
     final_log = ""
     for env_name, (env, evaluator) in val_envs.items():
@@ -418,8 +483,13 @@ def train_val():
 
     featurized_scans = set([key.split("_")[0] for key in list(feat_dict.keys())])
 
-    train_env = R2RBatch(feat_dict, obj_d_feat=obj_d_feat, obj_s_feat=obj_s_feat, batch_size=args.batchSize,
+    # train_env = R2RBatch(feat_dict, batch_size=args.batchSize, splits=['train'], tokenizer=tok)
+    if args.multi:
+        train_env = R2RBatch_Multi(feat_dict, obj_d_feat=obj_d_feat, obj_s_feat=obj_s_feat, batch_size=args.batchSize,
                          splits=['train'], tokenizer=tok)
+    else:
+        train_env = R2RBatch(feat_dict, obj_d_feat=obj_d_feat, obj_s_feat=obj_s_feat, batch_size=args.batchSize,
+                             splits=['train'], tokenizer=tok)
     from collections import OrderedDict
 
     val_env_names = ['val_unseen', 'val_seen']
@@ -432,6 +502,17 @@ def train_val():
     if not args.beam:
         val_env_names.append("train")
 
+    # if args.multi:
+    #     val_envs = OrderedDict(
+    #     ((split,
+    #       (R2RBatch_Multi(feat_dict, obj_d_feat=obj_d_feat, obj_s_feat=obj_s_feat, batch_size=args.batchSize, splits=[split],
+    #                 tokenizer=tok),
+    #        Evaluation([split], featurized_scans, tok))
+    #       )
+    #      for split in val_env_names
+    #      )
+    # )
+    # else:
     val_envs = OrderedDict(
         ((split,
           (R2RBatch(feat_dict, obj_d_feat=obj_d_feat, obj_s_feat=obj_s_feat, batch_size=args.batchSize, splits=[split],
@@ -441,6 +522,15 @@ def train_val():
          for split in val_env_names
          )
     )
+
+    # val_envs = OrderedDict(
+    #     ((split,
+    #       (R2RBatch(feat_dict, batch_size=args.batchSize, splits=[split], tokenizer=tok),
+    #        Evaluation([split], featurized_scans, tok))
+    #       )
+    #      for split in val_env_names
+    #      )
+    # )
 
     if args.train == 'listener':
         train(train_env, tok, args.iters, val_envs=val_envs)
@@ -461,7 +551,11 @@ def valid_speaker(tok, val_envs):
     import tqdm
     listner = Seq2SeqAgent(None, "", tok, args.maxAction)
     speaker = Speaker(None, listner, tok)
-    speaker.load(args.load)
+    if args.upload:
+        speaker.load(get_sync_dir('lyx/snap/speaker/state_dict/best_val_unseen_bleu'))
+    else:
+        speaker.load(os.path.join(args.R2R_Aux_path, args.load))
+
 
     for env_name, (env, evaluator) in val_envs.items():
         if env_name == 'train':
@@ -496,6 +590,19 @@ def train_val_augment():
     feat_dict = read_img_features(features)
     featurized_scans = set([key.split("_")[0] for key in list(feat_dict.keys())])
 
+    # Load the env obj features
+    obj_s_feat = None
+    if args.sparseObj:
+        print("Start loading the object sparse feature")
+        start = time.time()
+        obj_s_feat = np.load(sparse_obj_feat, allow_pickle=True).item()
+        print("Finish Loading the object sparse feature from %s in %0.4f seconds" % (
+            sparse_obj_feat, time.time() - start))
+
+    obj_d_feat = None
+    if args.denseObj:
+        obj_d_feat = utils.read_obj_dense_features(dense_obj_feat1, dense_obj_feat2, args.objthr)
+
     # Load the augmentation data
     if args.upload:
         aug_path = get_sync_dir(os.path.join(args.upload_path, args.aug))
@@ -503,10 +610,14 @@ def train_val_augment():
         aux_path = os.path.join(args.R2R_Aux_path, args.aug)
 
     # Create the training environment
-    train_env = R2RBatch(feat_dict, batch_size=args.batchSize,
+    train_env = R2RBatch(feat_dict, obj_d_feat=obj_d_feat, obj_s_feat=obj_s_feat, batch_size=args.batchSize,
                          splits=['train'], tokenizer=tok)
-    aug_env   = R2RBatch(feat_dict, batch_size=args.batchSize,
-                         splits=[aug_path], tokenizer=tok, name='aug')
+    aug_env = R2RBatch(feat_dict, obj_d_feat=obj_d_feat, obj_s_feat=obj_s_feat, batch_size=args.batchSize,
+                       splits=[aug_path], tokenizer=tok, name='aug')
+    # train_env = R2RBatch(feat_dict, batch_size=args.batchSize,
+    #                      splits=['train'], tokenizer=tok)
+    # aug_env   = R2RBatch(feat_dict, batch_size=args.batchSize,
+    #                      splits=[aug_path], tokenizer=tok, name='aug')
 
     # Printing out the statistics of the dataset
     stats = train_env.get_statistics()
@@ -519,9 +630,14 @@ def train_val_augment():
     print("The average action length of the dataset is %0.4f." % (stats['path']))
 
     # Setup the validation data
-    val_envs = {split: (R2RBatch(feat_dict, batch_size=args.batchSize, splits=[split],
-                                 tokenizer=tok), Evaluation([split], featurized_scans, tok))
+    val_envs = {split: (
+    R2RBatch(feat_dict, obj_d_feat=obj_d_feat, obj_s_feat=obj_s_feat, batch_size=args.batchSize, splits=[split],
+             tokenizer=tok), Evaluation([split], featurized_scans, tok))
                 for split in ['train', 'val_seen', 'val_unseen']}
+
+    # val_envs = {split: (R2RBatch(feat_dict, batch_size=args.batchSize, splits=[split],
+    #                              tokenizer=tok), Evaluation([split], featurized_scans, tok))
+    #             for split in ['train', 'val_seen', 'val_unseen']}
 
     # Start training
     train(train_env, tok, args.iters, val_envs=val_envs, aug_env=aug_env)
