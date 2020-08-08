@@ -253,7 +253,7 @@ class R2RBatch():
         nextViewpointId = path[1]
         return nextViewpointId
 
-    def make_candidate(self, feature, scanId, viewpointId, viewId, obj_d_feat=None, obj_s_feat=None):
+    def make_candidate(self, feature, scanId, viewpointId, viewId):
         def _loc_distance(loc):
             return np.sqrt(loc.rel_heading ** 2 + loc.rel_elevation ** 2)
         base_heading = (viewId % 12) * math.radians(30)
@@ -276,8 +276,6 @@ class R2RBatch():
                 elevation = state.elevation
 
                 visual_feat = feature[ix]
-                if obj_d_feat:
-                    odf = obj_d_feat[ix]
 
                 # get adjacent locations
                 for j, loc in enumerate(state.navigableLocations[1:]):
@@ -302,8 +300,6 @@ class R2RBatch():
                             'idx': j + 1,
                             'feature': np.concatenate((visual_feat, angle_feat), -1)
                         }
-                        if obj_d_feat:
-                            adj_dict[loc.viewpointId]['obj_d_feat'] = odf
             candidate = list(adj_dict.values())
             self.buffered_state_dict[long_id] = [
                 {key: c[key]
@@ -325,8 +321,6 @@ class R2RBatch():
                 c_new['heading'] = loc_heading
                 angle_feat = utils.angle_feature(c_new['heading'], c_new['elevation'])
                 c_new['feature'] = np.concatenate((visual_feat, angle_feat), -1)
-                if obj_d_feat:
-                    c_new['obj_feat'] = obj_d_feat[ix]
                 c_new.pop('normalized_heading')
                 candidate_new.append(c_new)
             return candidate_new
@@ -368,52 +362,52 @@ class R2RBatch():
                 'teacher' : self._shortest_path_action(state, item['path'][-1]),
                 'path_id' : item['path_id']
             }
-            if args.sparseObj:
-                obs_dict['obj_s_feature'] = osf['concat_feature']
-                obs_dict['bbox_angle_h'] = osf['concat_angles_h']
-                obs_dict['bbox_angle_e'] = osf['concat_angles_e']
             if args.denseObj:
                 if args.catfeat == 'none':
                     obs_dict['obj_d_feature'] = odf['concat_feature']
-                elif args.catfeat == 'bboxAngle':
+                elif args.catfeat =='bboxAngle': # concat bbox 2d coordinates & vision_angle_feature
                     if odf['concat_text'][0] == 'zero':
                         obs_dict['obj_d_feature'] = np.concatenate(
-                            (odf['concat_feature'],np.zeros((1,args.angle_feat_size*2))),axis=1)
+                            (odf['concat_feature'], np.zeros((1,args.angle_feat_size))),axis=1)
                     elif odf['concat_text'][0] == 'average':
                         obs_dict['obj_d_feature'] = np.concatenate(
-                            (odf['concat_feature'], np.tile(odf['concat_bbox'],args.angle_feat_size//4),
-                             np.expand_dims(self.angle_avg_feature[base_view_id],axis=0)),axis=1)
+                            (odf['concat_feature'], np.tile(odf['concat_bbox'], (args.angle_feat_size/2)//4),
+                             np.expand_dims(self.angle_avg_feature[base_view_id][:args.angle_feat_size/2], axis=0)), axis=1)
                     else:
-                        obs_dict['obj_d_feature'] = np.zeros((len(odf['concat_feature']),args.angle_feat_size*2+args.feature_size))
+                        obs_dict['obj_d_feature'] = np.zeros((len(odf['concat_feature']), args.angle_feat_size
+                                                              +args.feature_size))
                         for k,v in enumerate(odf['concat_viewIndex']):
                             obs_dict['obj_d_feature'][k] = np.concatenate(
-                                (odf['concat_feature'][k], np.tile(odf['concat_bbox'][k],args.angle_feat_size//4),
-                                 self.angle_feature[base_view_id][v]))
-                elif args.catfeat == 'bbox':
+                                (odf['concat_feature'][k], np.tile(odf['concat_bbox'][k], (args.angle_feat_size/2)//4),
+                                 self.angle_feature[base_view_id][v][:args.angle_feat_size/2]))
+                elif args.catfeat == 'bbox': # concat bbox 2d coordinates
                     if odf['concat_text'][0] == 'zero':
                         obs_dict['obj_d_feature'] = np.concatenate(
-                            (odf['concat_feature'],np.zeros((1,args.angle_feat_size))),axis=1)
+                            (odf['concat_feature'], np.zeros((1,args.angle_feat_size))), axis=1)
                     elif odf['concat_text'][0] == 'average':
                         obs_dict['obj_d_feature'] = np.concatenate(
-                            (odf['concat_feature'], np.tile(odf['concat_bbox'],args.angle_feat_size//4)),axis=1)
+                            (odf['concat_feature'],np.tile(odf['concat_bbox'], args.angle_feat_size//4)),axis=1)
                     else:
-                        obs_dict['obj_d_feature'] = np.zeros((len(odf['concat_feature']),args.angle_feat_size+args.feature_size))
-                        for k,v in enumerate(odf['concat_viewIndex']):
+                        obs_dict['obj_d_feature'] = np.zeros(
+                            (len(odf['concat_feature']), args.angle_feat_size + args.feature_size))
+                        for k, v in enumerate(odf['concat_viewIndex']):
                             obs_dict['obj_d_feature'][k] = np.concatenate(
-                                (odf['concat_feature'][k], np.tile(odf['concat_bbox'][k],args.angle_feat_size//4)))
-                elif args.catfeat == 'angle':
+                                (odf['concat_feature'][k], np.tile(odf['concat_bbox'][k], args.angle_feat_size // 4)))
+                elif args.catfeat == 'angle': # concat vision_angle_feature
                     if odf['concat_text'][0] == 'zero':
                         obs_dict['obj_d_feature'] = np.concatenate(
-                            (odf['concat_feature'],np.zeros((1,args.angle_feat_size))),axis=1)
+                            (odf['concat_feature'], np.zeros((1, args.angle_feat_size))), axis=1)
                     elif odf['concat_text'][0] == 'average':
                         obs_dict['obj_d_feature'] = np.concatenate(
-                            (odf['concat_feature'], np.expand_dims(self.angle_avg_feature[base_view_id],axis=0)),axis=1)
+                            (odf['concat_feature'], np.expand_dims(self.angle_avg_feature[base_view_id], axis=0)),
+                            axis=1)
                     else:
-                        obs_dict['obj_d_feature'] = np.zeros((len(odf['concat_feature']),args.angle_feat_size+args.feature_size))
-                        for k,v in enumerate(odf['concat_viewIndex']):
+                        obs_dict['obj_d_feature'] = np.zeros(
+                            (len(odf['concat_feature']), args.angle_feat_size + args.feature_size))
+                        for k, v in enumerate(odf['concat_viewIndex']):
                             obs_dict['obj_d_feature'][k] = np.concatenate(
                                 (odf['concat_feature'][k], self.angle_feature[base_view_id][v]))
-                elif args.catfeat == 'he':
+                elif args.catfeat == 'he': # concat bbox2angle
                     if odf['concat_text'][0] == 'zero':
                         obs_dict['obj_d_feature'] = np.concatenate(
                             (odf['concat_feature'], np.zeros((1, args.angle_feat_size))), axis=1)
@@ -421,10 +415,11 @@ class R2RBatch():
                         # he = np.tile(np.concatenate((odf['concat_angles_h'],odf['concat_angles_e']),axis=1),args.angle_feat_size//8)
                         he = odf['concat_angles']
                         obs_dict['obj_d_feature'] = np.concatenate(
-                            (odf['concat_feature'],he),1)
+                            (odf['concat_feature'], he), 1)
                     else:
-                        obs_dict['obj_d_feature'] = np.zeros((len(odf['concat_feature']),args.angle_feat_size+args.feature_size))
-                        for k,v in enumerate(odf['concat_viewIndex']):
+                        obs_dict['obj_d_feature'] = np.zeros(
+                            (len(odf['concat_feature']), args.angle_feat_size + args.feature_size))
+                        for k, v in enumerate(odf['concat_viewIndex']):
                             # he = np.tile(np.concatenate((odf['concat_angles_h'][k], odf['concat_angles_e'][k])),
                             #              args.angle_feat_size // 8)
                             he = odf['concat_angles'][k]

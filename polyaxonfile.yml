@@ -15,4 +15,4 @@ environment:
 
 
 run:
-    cmd: python3.6  r2r_src/train.py --train validlistener --upload --denseObj --objthr 0.99 --name Envdrop_denseObj_0.99_cat_none --submit --load snap/Envdrop_MultiVis2Attn_denseObj_0.99_cat_none/state_dict/best_val_unseen
+    cmd: python3.6 r2r_src/train.py --submit --upload --denseObj --catRN --objthr 0.99 --objInputMode sg --name valid_merge_objMulti_exceptModel
