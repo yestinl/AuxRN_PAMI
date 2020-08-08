@@ -104,6 +104,9 @@ class Param:
         # self.parser.add_argument("--catAngleBbox", dest='catAngleBbox', action='store_const', default=False, const=True)
         self.parser.add_argument("--catfeat", type=str, default="none")  # none,he,bbox,angle,bboxAngle
 
+        # debug
+        self.parser.add_argument("--seed", dest="seed", type=float, default=0)
+
         self.args = self.parser.parse_args()
 
         if self.args.optim == 'rms':

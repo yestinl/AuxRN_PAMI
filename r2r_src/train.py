@@ -19,7 +19,7 @@ import numpy as np
 from collections import defaultdict
 from speaker import Speaker
 
-from utils import read_vocab,write_vocab,build_vocab,Tokenizer,padding_idx,timeSince, read_img_features, get_sync_dir
+from utils import read_vocab,write_vocab,build_vocab,Tokenizer,padding_idx,timeSince, read_img_features, get_sync_dir,setup_seed
 import utils
 from env import R2RBatch
 from agent import Seq2SeqAgent
@@ -38,6 +38,8 @@ warnings.filterwarnings("ignore")
 
 from tensorboardX import SummaryWriter
 from polyaxon_client.tracking import get_outputs_path
+if args.seed>0:
+    setup_seed(args.seed)
 
 if args.upload:
     train_vocab = get_sync_dir(os.path.join(args.upload_path,args.TRAIN_VOCAB))
@@ -388,8 +390,13 @@ def beam_valid(train_env, tok, val_envs={}):
 
 
 def setup():
-    torch.manual_seed(1)
-    torch.cuda.manual_seed(1)
+
+    if args.seed>0:
+        torch.manual_seed(args.seed)
+        torch.cuda.manual_seed(args.seed)
+    else:
+        torch.manual_seed(1)
+        torch.cuda.manual_seed(1)
     # Check for vocabs
     if not os.path.exists(train_vocab):
         write_vocab(build_vocab(splits=['train']), train_vocab)

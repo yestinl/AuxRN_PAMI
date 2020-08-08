@@ -5,6 +5,9 @@ from torch.autograd import Variable
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence, pad_packed_sequence
 from param import args
+from utils import setup_seed
+if args.seed >0:
+    setup_seed(args.seed)
 
 
 class EncoderLSTM(nn.Module):
