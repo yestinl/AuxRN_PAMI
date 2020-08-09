@@ -362,6 +362,26 @@ class R2RBatch():
                 'teacher' : self._shortest_path_action(state, item['path'][-1]),
                 'path_id' : item['path_id']
             }
+            if args.sparseObj:
+                if args.catfeat == 'none':
+                    obs_dict['obj_s_feature'] = osf['concat_feature']
+                elif args.catfeat == 'he':
+                    if osf['concat_text'][0] == 'zero':
+                        obs_dict['obj_s_feature'] = np.concatenate(
+                            (osf['concat_feature'], np.zeros((1, 16))), axis=1)
+                    elif osf['concat_text'][0] == 'average':
+                        he = osf['concat_angles']
+                        obs_dict['obj_s_feature'] = np.concatenate(
+                            (osf['concat_feature'], he), 1)
+                    else:
+                        obs_dict['obj_s_feature'] = np.zeros(
+                            (len(osf['concat_feature']), 16 + 300))
+                        for k, v in enumerate(osf['concat_viewIndex']):
+                            # he = np.tile(np.concatenate((odf['concat_angles_h'][k], odf['concat_angles_e'][k])),
+                            #              args.angle_feat_size // 8)
+                            he = osf['concat_angles'][k]
+                            obs_dict['obj_s_feature'][k] = np.concatenate(
+                                (osf['concat_feature'][k], he))
             if args.denseObj:
                 if args.catfeat == 'none':
                     obs_dict['obj_d_feature'] = odf['concat_feature']

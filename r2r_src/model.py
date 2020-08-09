@@ -248,7 +248,14 @@ class AttnDecoderLSTM(nn.Module):
                        dropout_ratio):
         super(AttnDecoderLSTM, self).__init__()
         self.obj_feat_size = 0
-        if args.denseObj and (not args.sparseObj):
+        if args.sparseObj and (not args.denseObj):
+            print("Train in sparseObj+RN cat %s, %s mode" % (args.catfeat, args.objInputMode))
+            if args.catfeat == 'none':
+                self.obj_angle_num = 0
+            else:
+                self.obj_angle_num = 1
+            self.obj_feat_size = args.instEmb + args.instHE * self.obj_angle_num
+        elif args.denseObj and (not args.sparseObj):
             print("Train in denseObj+RN cat %s, %s mode" % (args.catfeat,args.objInputMode))
             if args.catfeat == 'none':
                 self.obj_angle_num = 0
@@ -279,7 +286,8 @@ class AttnDecoderLSTM(nn.Module):
         else:
             self.lstm = nn.LSTMCell(embedding_size + self.lstm_feature_size, hidden_size)
             self.feat_att_layer = SoftDotAttention(hidden_size, args.feature_size + args.angle_feat_size)
-        if args.denseObj:
+
+        if args.denseObj or args.sparseObj:
             if args.objInputMode == 'sg' or 'tanh':
                 self.dense_input_layer = Gate(hidden_size, self.obj_feat_size)
             elif args.objInputMode == 'sm':
@@ -319,6 +327,11 @@ class AttnDecoderLSTM(nn.Module):
         if not already_dropfeat:
             # Dropout the raw feature as a common regularization
             feature[..., :-args.angle_feat_size] = self.drop_env(feature[..., :-args.angle_feat_size])   # Do not drop the last args.angle_feat_size (position feat)
+            if sparseObj is not None:
+                if args.catfeat == 'none':
+                    sparseObj = self.drop_env(sparseObj)
+                else:
+                    sparseObj[..., -args.instHE] = self.drop_env(sparseObj[..., -args.instHE])
             if denseObj is not None:
                 if args.catfeat == 'none':
                     denseObj = self.drop_env(denseObj)
@@ -327,7 +340,10 @@ class AttnDecoderLSTM(nn.Module):
 
         prev_h1_drop = self.drop(prev_h1)
 
-        if denseObj is not None:
+        if args.sparseObj and (not args.denseObj):
+            obj_input_feat, _ = self.dense_input_layer(prev_h1_drop, sparseObj, mask=ObjFeature_mask,
+                                                       output_tilde=False)
+        elif args.denseObj and (not args.sparseObj):
             obj_input_feat, _ = self.dense_input_layer(prev_h1_drop, denseObj, mask=ObjFeature_mask,
                                                          output_tilde=False)
 

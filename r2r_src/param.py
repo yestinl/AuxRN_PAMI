@@ -77,6 +77,7 @@ class Param:
         self.parser.add_argument("--attn", type=str, default="soft")    # soft, mono, shift, dis_shift
 
         self.parser.add_argument("--angleFeatSize", dest="angle_feat_size", type=int, default=128)
+        # self.parser.add_argument("--views", dest='views',type=int,default=36)
 
         # A2C
         self.parser.add_argument("--gamma", default=0.9, type=float)
@@ -93,7 +94,8 @@ class Param:
         self.parser.add_argument('--objdir', type=str, default='0_8')
         self.parser.add_argument("--objthr", dest='objthr', type=float, default=0.99)
         self.parser.add_argument("--angleObjSize", dest="angle_bbox_size", type=int, default=8)
-        self.parser.add_argument("--gloveEmb", dest="glove_emb", type=int, default=300)
+        self.parser.add_argument("--insEmb", dest="instEmb", type=int, default=300)
+        self.parser.add_argument("--insHE", dest= "instHE", type=int, default=16)
         self.parser.add_argument("--sparseObj", dest='sparseObj', action='store_const', default=False, const=True)
         self.parser.add_argument("--catRN", dest='catRN', action='store_const', default=False, const=True)
         self.parser.add_argument("--addRN", dest='addRN', action='store_const', default=False, const=True)

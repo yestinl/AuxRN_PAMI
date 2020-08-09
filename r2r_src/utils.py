@@ -299,7 +299,7 @@ def read_obj_dense_features(dense_obj_feat1, dense_obj_feat2, bbox, sparse_obj_f
     avg_b = sum_bbox/obj_num
     avg_e = sum_e/obj_num
     avg_h = sum_h/obj_num
-    avg_angle = obj_rad2reg_feature(avg_e, avg_h)
+    avg_angle = obj_rad2reg_feature(avg_e, avg_h, 'dense')
     objs = {}
     for n, (scanId, viewpointId) in enumerate(viewpointIds):
         long_id = scanId + '_' + viewpointId
@@ -315,7 +315,7 @@ def read_obj_dense_features(dense_obj_feat1, dense_obj_feat2, bbox, sparse_obj_f
                 continue
             assert bb_viewIndex == viewIndex
             flag = 1
-            angles = obj_rad2reg_feature(angles_h, angles_e)
+            angles = obj_rad2reg_feature(angles_h, angles_e, 'dense')
             viewpoint_object.append({'bbox':bb,'angles': angles, 'features': features,
                                      'text': txt, 'viewIndex': viewIndex, 'prob': prob})
         if not flag and (th!=1): # thresh out and pad average feature
@@ -370,13 +370,6 @@ def read_obj_sparse_features(sparse_obj_feat, th):
             for i, feat in enumerate(obj_s_feat[long_id]['concat_feature']):
                 if obj_s_feat[long_id]['concat_prob'][i] < th:
                     continue
-                # txt = obj_d_feat[long_id]['concat_text'][i].split()
-                # if len(txt) == 1:
-                #     if txt[0] == 'wall' or txt[0] == 'ceiling':
-                #         continue
-                # elif txt[1] == 'wall' or txt[1] == 'ceiling':
-                #     # print(txt[1])
-                #     continue
                 sum_feature += feat
                 sum_e += obj_s_feat[long_id]['concat_angles_e'][i]
                 sum_h += obj_s_feat[long_id]['concat_angles_h'][i]
@@ -385,6 +378,7 @@ def read_obj_sparse_features(sparse_obj_feat, th):
     avg_feature = sum_feature/obj_num
     avg_e = sum_e/obj_num
     avg_h = sum_h/obj_num
+    avg_angle = obj_rad2reg_feature(avg_e, avg_h, 'sparse')
 
     objs = {}
     for n, (scanId, viewpointId) in enumerate(viewpointIds):
@@ -398,44 +392,32 @@ def read_obj_sparse_features(sparse_obj_feat, th):
         ):
             if prob < th:
                 continue
-            # t = txt.split()
-            # if len(t) == 1:
-            #     if t[0] == 'wall' or t[0] == 'ceiling':
-            #         continue
-            # elif t[1] == 'wall' or t[1] == 'ceiling':
-            #     continue
-            # if len(t) == 1:
-            #     txt = t[0]
-            # else:
-            #     txt = t[0] + ' ' + t[1]
             flag = 1
-            viewpoint_object.append({'angles_h': angles_h, 'angles_e': angles_e,'features': features,
+            angles = obj_rad2reg_feature(angles_h, angles_e, 'sparse')
+            viewpoint_object.append({'angles': angles, 'features': features,
                                   'text': txt,'viewIndex': viewIndex,'prob': prob})
         if not flag and (th != 1):
-            viewpoint_object.append({'angles_h': avg_h, 'angles_e': avg_e, 'features': avg_feature,
+            viewpoint_object.append({'angles': avg_angle, 'features': avg_feature,
                                   'text': 'average', 'viewIndex': None, 'prob': None})
             none_num +=1
         if th == 1:
-            viewpoint_object.append({'angles_h': np.zeros(4), 'angles_e': np.zeros(4), 'features': np.zeros(300),
+            viewpoint_object.append({'angles': np.zeros(16),  'features': np.zeros(300),
                                      'text': 'average', 'viewIndex': None, 'prob': None})
             none_num +=1
         num_obj = len(viewpoint_object)
-        concat_angles_h = np.zeros((num_obj, 4), np.float32)
-        concat_angles_e = np.zeros((num_obj, 4), np.float32)
+        concat_angles = np.zeros((num_obj,16), np.float32)
         concat_dense_feature = np.zeros((num_obj, 300))
         concat_text = [None] * num_obj
         concat_viewIndex = [None] * num_obj
         concat_prob = [None] * num_obj
         for n_obj, obj in enumerate(viewpoint_object):
-            concat_angles_h[n_obj] = obj['angles_h']
-            concat_angles_e[n_obj] = obj['angles_e']
+            concat_angles[n_obj] = obj['angles']
             concat_dense_feature[n_obj] = obj['features']
             concat_text[n_obj] = obj['text']
             concat_viewIndex[n_obj] = obj['viewIndex']
             concat_prob[n_obj] = obj['prob']
         objs[long_id] = {
-            'concat_angles_h': concat_angles_h,
-            'concat_angles_e': concat_angles_e,
+            'concat_angles': concat_angles,
             'concat_feature': concat_dense_feature,
             'concat_text': concat_text,
             'concat_viewIndex': concat_viewIndex,
@@ -517,7 +499,7 @@ def angle_feature(heading, elevation):
                      math.sin(elevation), math.cos(elevation)] * (args.angle_feat_size // 4),
                     dtype=np.float32)
 
-def obj_rad2reg_feature(heading, elevation):
+def obj_rad2reg_feature(heading, elevation, obj):
     import math
     result = []
     for h in heading:
@@ -526,7 +508,10 @@ def obj_rad2reg_feature(heading, elevation):
     for e in elevation:
         result.append(math.sin(e))
         result.append(math.cos(h))
-    return np.array(result*(args.angle_feat_size//16),dtype=np.float32)
+    if obj=='sparse':
+        return np.array(result, dtype=np.float32)
+    elif obj=='dense':
+        return np.array(result*(args.angle_feat_size//16),dtype=np.float32)
 
 def new_simulator():
     import MatterSim
