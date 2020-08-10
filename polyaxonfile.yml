@@ -15,4 +15,4 @@ environment:
 
 
 run:
-    cmd: python3.6 r2r_src/train.py --submit --upload --name baseline_submit
+    cmd: python3.6  r2r_src/train.py --upload --submit --sparseObj --denseObj --objthr=0.8 --catfeat=none --name sparseAnddenseObj_0.8_cat_none

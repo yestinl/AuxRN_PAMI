@@ -361,7 +361,7 @@ class AttnDecoderLSTM(nn.Module):
             obj_input_feat = sparse_input_feat
         elif args.denseObj and (not args.sparseObj):
             obj_input_feat = dense_input_feat
-        else:
+        elif args.denseObj and args.sparseObj:
             obj_input_feat = torch.cat([sparse_input_feat, dense_input_feat],1)
 
         RN_attn_feat, _ = self.feat_att_layer(prev_h1_drop, feature, output_tilde=False)
