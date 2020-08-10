@@ -22,4 +22,4 @@ environment:
 
 
 run:
-    cmd: python3.6  r2r_src/train.py --upload --submit --sparseObj --objthr={{thr}} --catfeat={{catFeat}} --name sparseObj_{{thr}}_cat_{{catFeat}}
+    cmd: python3.6  r2r_src/train.py --upload --submit --sparseObj --denseObj --objthr={{thr}} --catfeat={{catFeat}} --name sparseAnddenseObj_{{thr}}_cat_{{catFeat}}

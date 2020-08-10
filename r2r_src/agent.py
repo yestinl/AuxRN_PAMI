@@ -139,22 +139,20 @@ class Seq2SeqAgent(BaseAgent):
 
     def _feature_variable(self, obs):
         ''' Extract precomputed features into variable. '''
-        if args.sparseObj and not args.denseObj:
+        if args.sparseObj:
             Obj_leng = [ob['obj_s_feature'].shape[0] for ob in obs]
             if args.catfeat == 'none':
                 sparseObj = np.zeros((len(obs), max(Obj_leng), args.instEmb),
                                     dtype=np.float32)
+            elif args.denseObj:
+                sparseObj = np.zeros((len(obs), max(Obj_leng), args.instEmb),
+                                     dtype=np.float32)
             else:
                 sparseObj = np.zeros((len(obs), max(Obj_leng), args.instEmb+args.instHE),
                                     dtype=np.float32)
             for i,ob in enumerate(obs):
                 sparseObj[i, :Obj_leng[i], :] = ob['obj_s_feature']
-            features = np.empty((len(obs),args. views, self.feature_size+args.angle_feat_size), dtype=np.float32)
-            for i,ob in enumerate(obs):
-                features[i, :, :] = ob['feature']
-            return Variable(torch.from_numpy(sparseObj), requires_grad=False).cuda(), Obj_leng, Variable(
-                    torch.from_numpy(features), requires_grad=False).cuda()
-        elif args.denseObj and not args.sparseObj:
+        if args.denseObj:
             Obj_leng = [ob['obj_d_feature'].shape[0] for ob in obs]
             if args.catfeat == 'none':
                 denseObj = np.zeros((len(obs), max(Obj_leng), args.feature_size),
@@ -164,16 +162,19 @@ class Seq2SeqAgent(BaseAgent):
                                     dtype=np.float32)
             for i,ob in enumerate(obs):
                 denseObj[i, :Obj_leng[i], :] = ob['obj_d_feature']
-            features = np.empty((len(obs), args.views, self.feature_size+args.angle_feat_size),
-                                dtype=np.float32)
-            for i,ob in enumerate(obs):
-                features[i, :, :] = ob['feature']
+        features = np.empty((len(obs), args.views, self.feature_size + args.angle_feat_size), dtype=np.float32)
+        for i, ob in enumerate(obs):
+            features[i, :, :] = ob['feature']   # Image feat
+        if args.sparseObj and not(args.denseObj):
+            return Variable(torch.from_numpy(sparseObj), requires_grad=False).cuda(), Obj_leng, Variable(
+                torch.from_numpy(features), requires_grad=False).cuda()
+        elif args.denseObj and not (args.sparseObj):
             return Variable(torch.from_numpy(denseObj), requires_grad=False).cuda(), Obj_leng, Variable(
-                    torch.from_numpy(features), requires_grad=False).cuda()
+                torch.from_numpy(features), requires_grad=False).cuda()
+        elif args.denseObj and args.sparseObj:
+            return Variable(torch.from_numpy(sparseObj), requires_grad=False).cuda(),Variable(torch.from_numpy(denseObj), requires_grad=False).cuda(),\
+                   Obj_leng, Variable(torch.from_numpy(features), requires_grad=False).cuda()
         else:
-            features = np.empty((len(obs), args.views, self.feature_size + args.angle_feat_size), dtype=np.float32)
-            for i, ob in enumerate(obs):
-                features[i, :, :] = ob['feature']   # Image feat
             return Variable(torch.from_numpy(features), requires_grad=False).cuda()
 
     def _candidate_variable(self, obs):
@@ -338,6 +339,8 @@ class Seq2SeqAgent(BaseAgent):
                 sparseObj, Obj_leng, f_t = f_t_tuple
             elif args.denseObj and (not args.sparseObj):
                 denseObj, Obj_leng, f_t = f_t_tuple
+            elif args.denseObj and args.sparseObj:
+                sparseObj, denseObj, Obj_leng, f_t = f_t_tuple
             else:
                 f_t = f_t_tuple
 
@@ -460,6 +463,8 @@ class Seq2SeqAgent(BaseAgent):
                 sparseObj, Obj_leng, f_t = f_t_tuple
             elif args.denseObj and (not args.sparseObj):
                 denseObj, Obj_leng, f_t = f_t_tuple
+            elif args.denseObj and args.sparseObj:
+                sparseObj, denseObj, Obj_leng, f_t = f_t_tuple
             else:
                 f_t = f_t_tuple
             if Obj_leng is not None:

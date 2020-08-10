@@ -15,4 +15,4 @@ environment:
 
 
 run:
-    cmd: python3.6 r2r_src/train.py --submit --upload --denseObj --catRN --objthr 0.99 --objInputMode sg --name merge_obj_multiattn
+    cmd: python3.6 r2r_src/train.py --submit --upload --name baseline_submit

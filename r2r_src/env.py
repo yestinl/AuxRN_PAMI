@@ -365,7 +365,9 @@ class R2RBatch():
             if args.sparseObj:
                 if args.catfeat == 'none':
                     obs_dict['obj_s_feature'] = osf['concat_feature']
-                elif args.catfeat == 'he':
+                elif args.denseObj:
+                    obs_dict['obj_s_feature'] = osf['concat_feature']
+                elif args.catfeat == 'he': # avoid cat angle 2 times
                     if osf['concat_text'][0] == 'zero':
                         obs_dict['obj_s_feature'] = np.concatenate(
                             (osf['concat_feature'], np.zeros((1, 16))), axis=1)
@@ -382,6 +384,20 @@ class R2RBatch():
                             he = osf['concat_angles'][k]
                             obs_dict['obj_s_feature'][k] = np.concatenate(
                                 (osf['concat_feature'][k], he))
+                elif args.catfeat == 'angle':
+                    if osf['concat_text'][0] == 'zero':
+                        obs_dict['obj_s_feature'] = np.concatenate(
+                            (osf['concat_feature'], np.zeros((1,args.instHE))), axis=1)
+                    elif osf['concat_text'][0] == 'average':
+                        obs_dict['obj_s_feature'] = np.concatenate(
+                            (osf['concat_feature'], np.expand_dims(self.angle_avg_feature[base_view_id][:args.instHE]
+                                                                   ,axis=0)),axis=1)
+                    else:
+                        obs_dict['obj_s_feature'] = np.zeros(
+                            (len(osf['concat_feature']), args.instEmb+args.instHE))
+                        for k, v in enumerate(osf['concat_viewIndex']):
+                            obs_dict['obj_s_feature'][k] = np.concatenate(
+                                (osf['concat_feature'][k], self.angle_feature[base_view_id][v][:args.instHE]))
             if args.denseObj:
                 if args.catfeat == 'none':
                     obs_dict['obj_d_feature'] = odf['concat_feature']
