@@ -94,6 +94,7 @@ class Param:
         self.parser.add_argument("--attn", type=str, default="soft")    # soft, mono, shift, dis_shift
 
         self.parser.add_argument("--angleFeatSize", dest="angle_feat_size", type=int, default=128)
+        # self.parser.add_argument("--views", dest='views',type=int,default=36)
 
         # A2C
         self.parser.add_argument("--gamma", default=0.9, type=float)
@@ -101,6 +102,26 @@ class Param:
 
         # polyaxon
         self.parser.add_argument("--upload", action='store_const', default=False, const=True)
+
+        # Multi_head
+        self.parser.add_argument("--headNum", dest="headNum", type=int, default=2)
+        self.parser.add_argument("--multiMode", type=str, default="")  # vis,can,ins
+
+        # object
+        self.parser.add_argument('--objdir', type=str, default='0_8')
+        self.parser.add_argument("--objthr", dest='objthr', type=float, default=0.99)
+        self.parser.add_argument("--angleObjSize", dest="angle_bbox_size", type=int, default=8)
+        self.parser.add_argument("--insEmb", dest="instEmb", type=int, default=300)
+        self.parser.add_argument("--insHE", dest= "instHE", type=int, default=16)
+        self.parser.add_argument("--sparseObj", dest='sparseObj', action='store_const', default=False, const=True)
+        self.parser.add_argument("--catRN", dest='catRN', action='store_const', default=False, const=True)
+        self.parser.add_argument("--addRN", dest='addRN', action='store_const', default=False, const=True)
+        self.parser.add_argument("--denseObj", dest='denseObj', action='store_const', default=False, const=True)
+        self.parser.add_argument("--longCat", dest='longCat', action='store_const', default=False, const=True)
+        self.parser.add_argument("--objInputMode", type=str, default="sg")  # tanh,sg,sm
+        # self.parser.add_argument("--objType", type=str, default="dense")  # dense, denseRN, sparseRN, denSpaRN,
+        # self.parser.add_argument("--catAngleBbox", dest='catAngleBbox', action='store_const', default=False, const=True)
+        self.parser.add_argument("--catfeat", type=str, default="none")  # none,he,bbox,angle,bboxAngle
 
         self.args = self.parser.parse_args()
 
@@ -124,10 +145,10 @@ args.TRAINVAL_VOCAB = 'tasks/R2R/data/trainval_vocab.txt'
 args.IMAGENET_FEATURES = 'img_features/ResNet-152-imagenet.tsv'
 args.CANDIDATE_FEATURES = 'img_features/ResNet-152-candidate.tsv'
 args.features_fast = 'img_features/ResNet-152-imagenet-fast.tsv'
-# args.SPARSE_OBJ_FEATURES = 'obj_features/%s/panorama_objs_Features_nms_%s.npy'%(args.objdir, args.objdir)
-# args.DENSE_OBJ_FEATURES1 = 'obj_features/%s/panorama_objs_DenseFeatures_nms1_%s.npy'%(args.objdir, args.objdir)
-# args.DENSE_OBJ_FEATURES2 = 'obj_features/%s/panorama_objs_DenseFeatures_nms2_%s.npy'%(args.objdir, args.objdir)
-# args.BBOX_FEATURES = 'obj_features/%s/panorama_objs_bbox_%s.npy'%(args.objdir, args.objdir)
+args.SPARSE_OBJ_FEATURES = 'obj_features/%s/panorama_objs_Features_nms_%s.npy'%(args.objdir, args.objdir)
+args.DENSE_OBJ_FEATURES1 = 'obj_features/%s/panorama_objs_DenseFeatures_nms1_%s.npy'%(args.objdir, args.objdir)
+args.DENSE_OBJ_FEATURES2 = 'obj_features/%s/panorama_objs_DenseFeatures_nms2_%s.npy'%(args.objdir, args.objdir)
+args.BBOX_FEATURES = 'obj_features/%s/panorama_objs_bbox_%s.npy'%(args.objdir, args.objdir)
 args.log_dir = 'snap/%s' % args.name
 args.R2R_Aux_path =  '.'
 args.upload_path = 'lyx'

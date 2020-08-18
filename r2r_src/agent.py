@@ -22,7 +22,6 @@ from param import args
 from collections import defaultdict
 
 
-
 class BaseAgent(object):
     ''' Base class for an R2R agent to generate and save trajectories. '''
 
@@ -187,10 +186,43 @@ class Seq2SeqAgent(BaseAgent):
 
     def _feature_variable(self, obs):
         ''' Extract precomputed features into variable. '''
+        if args.sparseObj:
+            Obj_leng = [ob['obj_s_feature'].shape[0] for ob in obs]
+            if args.catfeat == 'none':
+                sparseObj = np.zeros((len(obs), max(Obj_leng), args.instEmb),
+                                    dtype=np.float32)
+            elif args.denseObj:
+                sparseObj = np.zeros((len(obs), max(Obj_leng), args.instEmb),
+                                     dtype=np.float32)
+            else:
+                sparseObj = np.zeros((len(obs), max(Obj_leng), args.instEmb+args.instHE),
+                                    dtype=np.float32)
+            for i,ob in enumerate(obs):
+                sparseObj[i, :Obj_leng[i], :] = ob['obj_s_feature']
+        if args.denseObj:
+            Obj_leng = [ob['obj_d_feature'].shape[0] for ob in obs]
+            if args.catfeat == 'none':
+                denseObj = np.zeros((len(obs), max(Obj_leng), args.feature_size),
+                                    dtype=np.float32)
+            else:
+                denseObj = np.zeros((len(obs), max(Obj_leng), args.feature_size+args.angle_feat_size),
+                                    dtype=np.float32)
+            for i,ob in enumerate(obs):
+                denseObj[i, :Obj_leng[i], :] = ob['obj_d_feature']
         features = np.empty((len(obs), args.views, self.feature_size + args.angle_feat_size), dtype=np.float32)
         for i, ob in enumerate(obs):
             features[i, :, :] = ob['feature']   # Image feat
-        return Variable(torch.from_numpy(features), requires_grad=False).cuda()
+        if args.sparseObj and not(args.denseObj):
+            return Variable(torch.from_numpy(sparseObj), requires_grad=False).cuda(), Obj_leng, Variable(
+                torch.from_numpy(features), requires_grad=False).cuda()
+        elif args.denseObj and not (args.sparseObj):
+            return Variable(torch.from_numpy(denseObj), requires_grad=False).cuda(), Obj_leng, Variable(
+                torch.from_numpy(features), requires_grad=False).cuda()
+        elif args.denseObj and args.sparseObj:
+            return Variable(torch.from_numpy(sparseObj), requires_grad=False).cuda(),Variable(torch.from_numpy(denseObj), requires_grad=False).cuda(),\
+                   Obj_leng, Variable(torch.from_numpy(features), requires_grad=False).cuda()
+        else:
+            return Variable(torch.from_numpy(features), requires_grad=False).cuda()
 
     def _candidate_variable(self, obs):
         candidate_leng = [len(ob['candidate']) + 1 for ob in obs]       # +1 is for the end
@@ -207,10 +239,12 @@ class Seq2SeqAgent(BaseAgent):
         for i, ob in enumerate(obs):
             input_a_t[i] = utils.angle_feature(ob['heading'], ob['elevation'])
         input_a_t = torch.from_numpy(input_a_t).cuda()
-
-        f_t = self._feature_variable(obs)      # Image features from obs
         candidate_feat, candidate_leng = self._candidate_variable(obs)
-
+        # if args.denseObj and (not args.sparseObj):
+        #     denseObj, Obj_leng, features = self._feature_variable(obs)
+        #     return input_a_t, denseObj, Obj_leng, features, candidate_feat, candidate_leng
+        # else:
+        f_t = self._feature_variable(obs)      # Image features from obs
         return input_a_t, f_t, candidate_feat, candidate_leng
 
     def _teacher_action(self, obs, ended):
@@ -236,7 +270,7 @@ class Seq2SeqAgent(BaseAgent):
 
     def make_equiv_action(self, a_t, perm_obs, perm_idx=None, traj=None):
         """
-        Interface between Panoramic view and Egocentric view 
+        Interface between Panoramic view and Egocentric view
         It will convert the action panoramic view action a_t to equivalent egocentric view actions for the simulator
         """
         def take_action(i, idx, name):
@@ -346,15 +380,42 @@ class Seq2SeqAgent(BaseAgent):
         fea_loss = 0.
         ang_loss = 0.
         for t in range(self.episode_len):
+            ObjFeature_mask = None
+            sparseObj = None
+            denseObj = None
+            f_t = None
+            Obj_leng = None
+            input_a_t, f_t_tuple, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
+            if args.sparseObj and (not args.denseObj):
+                sparseObj, Obj_leng, f_t = f_t_tuple
+            elif args.denseObj and (not args.sparseObj):
+                denseObj, Obj_leng, f_t = f_t_tuple
+            elif args.denseObj and args.sparseObj:
+                sparseObj, denseObj, Obj_leng, f_t = f_t_tuple
+            else:
+                f_t = f_t_tuple
 
-            input_a_t, f_t, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
+            if Obj_leng is not None:
+                ObjFeature_mask = utils.length2mask(Obj_leng)
             if speaker is not None:       # Apply the env drop mask to the feat
                 candidate_feat[..., :-args.angle_feat_size] *= noise
                 f_t[..., :-args.angle_feat_size] *= noise
+                if args.sparseObj:
+                    if args.catfeat == 'none':
+                        sparseObj *= noise
+                    else:
+                        sparseObj[...,:-args.instHE] *= noise
+                if args.denseObj:
+                    if args.catfeat == 'none':
+                        denseObj *=noise
+                    else:
+                        denseObj[...,:-args.angle_feat_size] *=noise
 
-            h_t, c_t, logit, h1 = self.decoder(input_a_t, f_t, candidate_feat,
-                                               h_t, h1, c_t,
-                                               ctx, ctx_mask,
+            h_t, c_t, logit, h1 = self.decoder(input_a_t,candidate_feat,
+                                               h1, c_t,
+                                               ctx, ctx_mask,feature=f_t,
+                                               sparseObj=sparseObj,denseObj=denseObj,
+                                               ObjFeature_mask=ObjFeature_mask,
                                                already_dropfeat=(speaker is not None))
 
             v_ctx.append(h_t)
@@ -379,7 +440,7 @@ class Seq2SeqAgent(BaseAgent):
             # Determine next model inputs
             if self.feedback == 'teacher':
                 a_t = target                # teacher forcing
-            elif self.feedback == 'argmax': 
+            elif self.feedback == 'argmax':
                 _, a_t = logit.max(1)        # student forcing - argmax
                 a_t = a_t.detach()
                 log_probs = F.log_softmax(logit, 1)                              # Calculate the log_prob here
@@ -476,27 +537,48 @@ class Seq2SeqAgent(BaseAgent):
             # Update the finished actions
             # -1 means ended or ignored (already ended)
             ended[:] = np.logical_or(ended, (cpu_a_t == -1))
-            
-            # print(t)
-            # print(ended)
-            # print(mask.astype(bool))
-            # print(_mask)
-            # import pdb; pdb.set_trace()
 
             # Early exit if all ended
-            if ended.all(): 
+            if ended.all():
                 break
 
         if train_rl:
             # Last action in A2C
-            input_a_t, f_t, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
+            ObjFeature_mask = None
+            sparseObj = None
+            denseObj = None
+            f_t = None
+            Obj_leng = None
+            input_a_t, f_t_tuple, candidate_feat, candidate_leng = self.get_input_feat(perm_obs)
+            if args.sparseObj and (not args.denseObj):
+                sparseObj, Obj_leng, f_t = f_t_tuple
+            elif args.denseObj and (not args.sparseObj):
+                denseObj, Obj_leng, f_t = f_t_tuple
+            elif args.denseObj and args.sparseObj:
+                sparseObj, denseObj, Obj_leng, f_t = f_t_tuple
+            else:
+                f_t = f_t_tuple
+            if Obj_leng is not None:
+                ObjFeature_mask = utils.length2mask(Obj_leng)
             if speaker is not None:
                 candidate_feat[..., :-args.angle_feat_size] *= noise
                 f_t[..., :-args.angle_feat_size] *= noise
-            last_h_, _, _, _ = self.decoder(input_a_t, f_t, candidate_feat,
-                                            h_t, h1, c_t,
-                                            ctx, ctx_mask,
-                                            speaker is not None)
+                if args.sparseObj:
+                    if args.catfeat == 'none':
+                        sparseObj *= noise
+                    else:
+                        sparseObj[...,-args.instHE] *= noise
+                if args.denseObj:
+                    if args.catfeat == 'none':
+                        denseObj *= noise
+                    else:
+                        denseObj[...,:-args.angle_feat_size] *= noise
+            last_h_, _, _, _ = self.decoder(input_a_t,candidate_feat,
+                                               h1, c_t,
+                                               ctx, ctx_mask,feature=f_t,
+                                               sparseObj=sparseObj,denseObj=denseObj,
+                                               ObjFeature_mask=ObjFeature_mask,
+                                               already_dropfeat=(speaker is not None))
             rl_loss = 0.
 
             # NOW, A2C!!!
@@ -523,8 +605,6 @@ class Seq2SeqAgent(BaseAgent):
                 if self.feedback == 'sample':
                     rl_loss += (- 0.01 * entropys[t] * mask_).sum()
                 self.logs['critic_loss'].append((((r_ - v_) ** 2) * mask_).sum().item())
-
-
                 total = total + np.sum(masks[t])
             self.logs['total'].append(total)
 
