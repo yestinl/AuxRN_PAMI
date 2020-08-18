@@ -589,7 +589,7 @@ class Seq2SeqAgent(BaseAgent):
                 self.logs['spe_loss'].append(0)
         
             # aux #2: progress indicator
-            if abs(args.proWeight - 0) > eps:
+            if abs(args.proWeight - 0) > eps and not (args.no_train_rl and train_rl):
                 if args.modpro:
                     prob = self.progress_indicator(vl_ctx)
                     valid_mask = ~decode_mask
