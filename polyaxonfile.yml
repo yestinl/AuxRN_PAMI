@@ -1,14 +1,14 @@
 version: 1
-kind: group
-# kind: experiment
+# kind: group
+kind: experiment
 
-hptuning:
-  concurrency: 5
-  matrix:
-    weight:
-    #   values: [0.05, 0.1, 0.33, 1, 2]
-      # values: [0.25, 0.5, 1, 2, 4]
-      values: [6, 8, 10]
+# hptuning:
+#   concurrency: 5
+#   matrix:
+#     weight:
+#     #   values: [0.05, 0.1, 0.33, 1, 2]
+#       # values: [0.25, 0.5, 1, 2, 4]
+#       values: [6, 8, 10]
 
 build:
     image: docker.dm-ai.cn/algorithm-research/matteraux:latest
@@ -28,8 +28,8 @@ inputs:
     type: str
 
 run:
-    # cmd: python3.6 r2r_src/train.py --upload --aux_option --speWeight {{ weight }} --submit --name {{ name }}_w_{{ weight }}
-    cmd: python3.6 r2r_src/train.py --upload --aux_option --proWeight {{ weight }} --modpro --no_train_rl --submit --name {{ name }}_w_{{ weight }}
-    # cmd: python3.6 r2r_src/train.py --upload --aux_option --matWeight {{ weight }} --modmat --no_train_rl --submit --name {{ name }}_w_{{ weight }}
-    # cmd: python3.6 r2r_src/train.py --upload --aux_option --feaWeight {{ weight }} --mask_fea --submit --name {{ name }}_w_{{ weight }}
-    # cmd: python3.6 r2r_src/train.py --upload --submit --name {{ name }}_w_{{ weight }}
+    cmd: python3.6  r2r_src/train.py \
+      --upload
+      --aux_option
+      --matWeight 0.1 --modmat
+      --submit --name {{ name }}

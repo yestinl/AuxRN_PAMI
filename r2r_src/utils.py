@@ -17,6 +17,10 @@ from collections import Counter, defaultdict
 import numpy as np
 import networkx as nx
 from param import args
+if args.upload:
+    sys.path.insert(0, '/R2R-Aux/build')
+else:
+    sys.path.insert(0, 'build')
 import subprocess
 
 from polyaxon_client.tracking import get_data_paths

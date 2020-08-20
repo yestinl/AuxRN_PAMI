@@ -720,12 +720,6 @@ class Seq2SeqAgent(BaseAgent):
                     mat_loss = F.binary_cross_entropy(prob, label) * args.matWeight
                     mat_loss1 = F.binary_cross_entropy(prob1, label) * args.matWeight
                     mat_loss2 = F.binary_cross_entropy(prob2, label) * args.matWeight
-                    # print(prob)
-                    # print(mat_loss)
-                    # print(mat_loss1)
-                    # print(mat_loss2)
-                    # mat_loss = F.binary_cross_entropy(prob, label, reduce=False) * args.matWeight
-                    # mat_loss = torch.mean(mat_loss.squeeze() * label_mask.float())
                     self.loss += mat_loss + mat_loss1 + mat_loss2
                 else:
                     h1 = v_ctx[:, -1, :]
