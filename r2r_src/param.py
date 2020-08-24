@@ -77,6 +77,7 @@ class Param:
         self.parser.add_argument('--teacher', type=str, default='final',
                             help="How to get supervision. one of ``next`` and ``final`` ")
         self.parser.add_argument('--epsilon', type=float, default=0.1)
+        self.parser.add_argument('--save_iter', type=int, default=40000)
 
         # Model hyper params:
         self.parser.add_argument('--rnnDim', dest="rnn_dim", type=int, default=512)

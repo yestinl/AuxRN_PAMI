@@ -230,7 +230,7 @@ def train(train_env, tok, n_iters, log_every=100, val_envs={}, aug_env=None):
         writer.add_scalar("loss/unsupervised", predict_loss, idx)
         print("total_actions", total)
         print("max_rl_length", max_rl_length)
-        
+
 
         # Run validation
         loss_str = ""
@@ -247,7 +247,7 @@ def train(train_env, tok, n_iters, log_every=100, val_envs={}, aug_env=None):
             loss_str += "%s " % env_name
             for metric,val in score_summary.items():
                 if metric in ['success_rate']:
-                    loss_str += ', %s: %.3f' % (metric, val)
+                    loss_str += ', %s: %.4f' % (metric, val)
                     writer.add_scalar("%s/accuracy" % env_name, val, idx)
                     if env_name in best_val:
                         if val > best_val[env_name]['accu']:
@@ -255,7 +255,7 @@ def train(train_env, tok, n_iters, log_every=100, val_envs={}, aug_env=None):
                             best_val[env_name]['update'] = True
                 if metric in ['spl']:
                     writer.add_scalar("%s/spl" % env_name, val, idx)
-                    loss_str += ', %s: %.3f' % (metric, val)
+                    loss_str += ', %s: %.4f' % (metric, val)
             loss_str += '\n'
         loss_str += '\n'
 
@@ -273,7 +273,7 @@ def train(train_env, tok, n_iters, log_every=100, val_envs={}, aug_env=None):
             for env_name in best_val:
                 print(env_name, best_val[env_name]['state'])
 
-        if iter % 40000 == 0:
+        if iter % args.save_iter == 0:
             file_dir = os.path.join(output_dir, "snap", args.name, "state_dict", "Iter_%06d" % (iter))
             listner.save(idx, file_dir)
 
@@ -393,7 +393,7 @@ def beam_valid(train_env, tok, val_envs={}):
                     if metric in ['success_rate']:
                         print("Avg speaker %s, Avg listener %s, For the speaker weight %0.4f, the result is %0.4f" %
                               (avg_speaker, avg_listener, alpha, val))
-                    loss_str += ",%s: %0.4f " % (metric, val)
+                    loss_str += ",%s: %0.5f " % (metric, val)
                 print(loss_str)
             print()
 
@@ -519,12 +519,22 @@ def train_val_augment():
     if args.upload:
         aug_path = get_sync_dir(os.path.join(args.upload_path, args.aug))
     else:
-        aux_path = os.path.join(args.R2R_Aux_path, args.aug)
+        aug_path = os.path.join(args.R2R_Aux_path, args.aug)
 
     # Create the training environment
-    train_env = R2RBatch(feat_dict, batch_size=args.batchSize,
+
+    # load object feature
+    obj_s_feat = None
+    if args.sparseObj:
+        obj_s_feat = utils.read_obj_sparse_features(sparse_obj_feat, args.objthr)
+
+    obj_d_feat = None
+    if args.denseObj:
+        obj_d_feat = utils.read_obj_dense_features(dense_obj_feat1, dense_obj_feat2, bbox, sparse_obj_feat, args.objthr)
+
+    train_env = R2RBatch(feat_dict, obj_d_feat=obj_d_feat, obj_s_feat=obj_s_feat, batch_size=args.batchSize,
                          splits=['train'], tokenizer=tok)
-    aug_env   = R2RBatch(feat_dict, batch_size=args.batchSize,
+    aug_env   = R2RBatch(feat_dict, obj_d_feat=obj_d_feat, obj_s_feat=obj_s_feat, batch_size=args.batchSize,
                          splits=[aug_path], tokenizer=tok, name='aug')
 
     # Printing out the statistics of the dataset

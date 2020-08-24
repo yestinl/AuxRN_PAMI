@@ -21,7 +21,7 @@ environment:
             requests: 1
             limits: 1
     outputs:
-        experiments: [10647]
+        experiments: [26699]
 inputs:
   - name: name
     is_optional: true
@@ -31,5 +31,15 @@ run:
     cmd: python3.6  r2r_src/train.py \
       --upload
       --aux_option
-      --matWeight 0.1 --modmat
-      --submit --name {{ name }}
+      --submit
+      --name {{ name }}
+      --attn soft --train auglistener --selfTrain
+      --aug tasks/R2R/data/aug_paths.json
+      --load snap/auxrn_final_v1_dense_25571/state_dict/best_val_unseen
+      --angleFeatSize 128
+      --accumulateGrad
+      --featdropout 0.4
+      --subout max --optim rms --lr 1e-4 --iters 200000 --maxAction 3
+      --denseObj --objthr=0.99 --catfeat=none
+      --speWeight 2 --proWeight 0.25 --modpro --no_train_rl
+      --matWeight 0.1 --modmat --feaWeight 4 --angWeight 2 --modfea --mask_fea
