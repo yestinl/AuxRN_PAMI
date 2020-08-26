@@ -400,16 +400,16 @@ class Seq2SeqAgent(BaseAgent):
             if speaker is not None:       # Apply the env drop mask to the feat
                 candidate_feat[..., :-args.angle_feat_size] *= noise
                 f_t[..., :-args.angle_feat_size] *= noise
-                if args.sparseObj:
-                    if args.catfeat == 'none':
-                        sparseObj *= noise
-                    else:
-                        sparseObj[...,:-args.instHE] *= noise
-                if args.denseObj:
-                    if args.catfeat == 'none':
-                        denseObj *=noise
-                    else:
-                        denseObj[...,:-args.angle_feat_size] *=noise
+                # if args.sparseObj:
+                #     if args.catfeat == 'none':
+                #         sparseObj *= noise
+                #     else:
+                #         sparseObj[...,:-args.instHE] *= noise
+                # if args.denseObj:
+                #     if args.catfeat == 'none':
+                #         denseObj *=noise
+                #     else:
+                #         denseObj[...,:-args.angle_feat_size] *=noise
 
             h_t, c_t, logit, h1 = self.decoder(input_a_t,candidate_feat,
                                                h1, c_t,
@@ -563,16 +563,16 @@ class Seq2SeqAgent(BaseAgent):
             if speaker is not None:
                 candidate_feat[..., :-args.angle_feat_size] *= noise
                 f_t[..., :-args.angle_feat_size] *= noise
-                if args.sparseObj:
-                    if args.catfeat == 'none':
-                        sparseObj *= noise
-                    else:
-                        sparseObj[...,-args.instHE] *= noise
-                if args.denseObj:
-                    if args.catfeat == 'none':
-                        denseObj *= noise
-                    else:
-                        denseObj[...,:-args.angle_feat_size] *= noise
+                # if args.sparseObj:
+                #     if args.catfeat == 'none':
+                #         sparseObj *= noise
+                #     else:
+                #         sparseObj[...,-args.instHE] *= noise
+                # if args.denseObj:
+                #     if args.catfeat == 'none':
+                #         denseObj *= noise
+                #     else:
+                #         denseObj[...,:-args.angle_feat_size] *= noise
             last_h_, _, _, _ = self.decoder(input_a_t,candidate_feat,
                                                h1, c_t,
                                                ctx, ctx_mask,feature=f_t,

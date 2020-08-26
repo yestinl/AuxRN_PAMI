@@ -28,7 +28,7 @@ inputs:
     type: str
 
 run:
-    cmd: python3.6  r2r_src/train.py \
+    cmd: python3.6  r2r_src/train.py
       --upload
       --aux_option
       --submit
@@ -39,7 +39,7 @@ run:
       --angleFeatSize 128
       --accumulateGrad
       --featdropout 0.4
-      --subout max --optim rms --lr 1e-4 --iters 200000 --maxAction 3
+      --subout max --optim rms --lr 1e-4 --iters 200000 --maxAction 35
       --denseObj --objthr=0.99 --catfeat=none
       --speWeight 2 --proWeight 0.25 --modpro --no_train_rl
-      --matWeight 0.1 --modmat --feaWeight 4 --angWeight 2 --modfea --mask_fea
+      --matWeight 0.1 --modmat --feaWeight 4 --angWeight 2 --modfea --mask_fea --save_iter 1000

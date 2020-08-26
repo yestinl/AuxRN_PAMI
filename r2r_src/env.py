@@ -328,8 +328,14 @@ class R2RBatch():
     def _get_obs(self):
         obs = []
         # for i, (feature, state) in enumerate(self.env.getStates()):
+        # print(self.env)
+        # print(len(self.env.getStates()))
         if args.sparseObj or args.denseObj:
-            F, obj_d_feat, obj_s_feat = self.env.getStates()
+            try:
+                F, obj_d_feat, obj_s_feat = self.env.getStates()
+            except Exception as e:
+                print(str(e)) 
+                import pdb; pdb.set_trace()
         else:
             F = self.env.getStates()
         for i in range(len(F)):
