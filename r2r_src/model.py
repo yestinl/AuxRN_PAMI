@@ -305,6 +305,15 @@ class Gate(nn.Module):
         else:
             return weighted_context, attn
 
+class MatchingAttention(nn.Module):
+    def __init__(self, hidden_size):
+        super(MatchingAttention, self).__init__()
+        self.proj = nn.Linear(hidden_size, 1)
+    
+    def forward(self, ctx):
+        logits = self.proj(ctx)
+        weights = F.softmax(logits, 1)
+        return torch.sum(weights * ctx, dim=1)
 
 class AttnDecoderLSTM(nn.Module):
     ''' An unrolled LSTM with attention over instructions for decoding navigation actions. '''
@@ -317,7 +326,7 @@ class AttnDecoderLSTM(nn.Module):
         self.obj_feat_size = 0
         self.s_obj_feat_size = 0
         self.d_obj_feat_size = 0
-        if args.sparseObj :
+        if args.sparseObj:
             print("Train in sparseObj cat %s, %s mode" % (args.catfeat, args.objInputMode))
             if args.catfeat == 'none':
                 self.s_obj_angle_num = 0

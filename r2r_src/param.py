@@ -66,6 +66,7 @@ class Param:
         self.parser.add_argument("--mat_detach", action='store_const', default=False, const=True)
         self.parser.add_argument("--mat_norm", action='store_const', default=False, const=True)
         self.parser.add_argument("--mat_mul", action='store_const', default=False, const=True)
+        self.parser.add_argument("--mat_attn", action='store_const', default=False, const=True)
 
         # Training Configurations
         self.parser.add_argument('--optim', type=str, default='rms')    # rms, adam

@@ -101,6 +101,7 @@ class Seq2SeqAgent(BaseAgent):
         self.decoder = model.AttnDecoderLSTM(args.aemb, args.rnn_dim, args.dropout, feature_size=self.feature_size + args.angle_feat_size).cuda()
         self.critic = model.Critic().cuda()
         self.models = (self.encoder, self.decoder, self.critic)
+        self.mat_attn = model.MatchingAttention(args.rnn_dim).cuda()
 
         # Optimizers
         self.encoder_optimizer = args.optimizer(self.encoder.parameters(), lr=args.lr)
@@ -709,7 +710,10 @@ class Seq2SeqAgent(BaseAgent):
                         # l_ctx = torch.cat((ctx[:,0,:], ctx[:,-1,:]), dim=1).detach()
                     else:
                         # l_ctx = torch.cat((ctx[:,0,:], ctx[:,-1,:]), dim=1)
-                        l_ctx = ctx[:,0,:]
+                        if args.mat_attn:
+                            l_ctx = self.mat_attn(ctx)
+                        else:
+                            l_ctx = ctx[:,0,:]
                     new_h1 = label * h1 + (1 - label) * h1[rand_idx, :]
                     new_l_ctx = label * l_ctx + (1 - label) * l_ctx[rand_idx, :]
                     # vl_pair = torch.cat((new_h1, h1), dim=1)

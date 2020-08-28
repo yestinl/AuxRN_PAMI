@@ -153,8 +153,8 @@ def train(train_env, tok, n_iters, log_every=100, val_envs={}, aug_env=None):
             print(refs_paths)
             load_model = os.path.join(refs_paths, args.load)
             print(load_model)
-            print("LOAD THE listener from %s" % load_model)
-            start_iter = listner.load(load_model)
+            print("LOAD THE listener from %s" % args.load)
+            start_iter = listner.load(args.load)
         else:
             print("LOAD THE listener from %s" % args.load)
             start_iter = listner.load(os.path.join(args.R2R_Aux_path, args.load))
